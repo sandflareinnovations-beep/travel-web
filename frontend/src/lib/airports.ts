@@ -1,0 +1,17 @@
+export const TOP_AIRPORTS = [
+    { code: "DEL", city: "New Delhi", name: "Indira Gandhi International Airport", country: "India" },
+    { code: "BOM", city: "Mumbai", name: "Chhatrapati Shivaji Maharaj International Airport", country: "India" },
+    { code: "BLR", city: "Bengaluru", name: "Kempegowda International Airport", country: "India" },
+    { code: "MAA", city: "Chennai", name: "Chennai International Airport", country: "India" },
+    { code: "CCU", city: "Kolkata", name: "Netaji Subhash Chandra Bose International Airport", country: "India" },
+    { code: "HYD", city: "Hyderabad", name: "Rajiv Gandhi International Airport", country: "India" },
+    { code: "COK", city: "Kochi", name: "Cochin International Airport", country: "India" },
+    { code: "AMD", city: "Ahmedabad", name: "Sardar Vallabhbhai Patel International Airport", country: "India" },
+    { code: "GOI", city: "Goa", name: "Dabolim Airport", country: "India" },
+    { code: "PNQ", city: "Pune", name: "Pune Airport", country: "India" },
+    { code: "DXB", city: "Dubai", name: "Dubai International Airport", country: "UAE" },
+    { code: "LHR", city: "London", name: "Heathrow Airport", country: "UK" },
+    { code: "JFK", city: "New York", name: "John F. Kennedy International Airport", country: "USA" },
+    { code: "SIN", city: "Singapore", name: "Changi Airport", country: "Singapore" },
+    { code: "BKK", city: "Bangkok", name: "Suvarnabhumi Airport", country: "Thailand" },
+];

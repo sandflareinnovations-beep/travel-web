@@ -1,7 +1,7 @@
 "use client";
-
-import React, { useState } from 'react';
-import { ArrowLeft, Plus, Trash2, CreditCard, CheckCircle, User, Mail, Phone, Plane, ShieldCheck } from 'lucide-react';
+//TODO: 
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Plus, Trash2, CreditCard, CheckCircle, User, Mail, Phone, Plane, ShieldCheck, Loader2, Armchair, ChevronRight, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -9,27 +9,205 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { flightApi } from '@/lib/api';
+import { useFlightStore } from '@/store/useFlightStore';
+import SSRSelector from '@/components/SSRSelector';
 
 interface Passenger {
     id: number;
     title: string;
     firstName: string;
     lastName: string;
-    nationality: string;
+    dob: string;                // "YYYY-MM-DD"
+    gender: string;             // "M" | "F"
+    nationality: string;        // "IN" | "SA" | ...
     passportNumber: string;
-    type: 'Adult' | 'Child' | 'Infant';
+    passportExpiry: string;     // PDOE — "YYYY-MM-DD"
+    visaType: string;           // "Visiting Visa" | ...
+    type: 'ADT' | 'CHD' | 'INF';
 }
 
 export default function BookingPage() {
     const router = useRouter();
-    const [passengers, setPassengers] = useState<Passenger[]>([
-        { id: 1, title: 'Mr', firstName: '', lastName: '', nationality: '', passportNumber: '', type: 'Adult' }
-    ]);
+    const searchParams = useSearchParams();
+    const tui = searchParams.get('tui');
+    const index = searchParams.get('index');
+
+    const { selectedFlight, searchParams: { adults, children, infants } } = useFlightStore();
+
+    const [passengers, setPassengers] = useState<Passenger[]>([]);
     const [contactEmail, setContactEmail] = useState('');
     const [contactPhone, setContactPhone] = useState('');
     const [isBooked, setIsBooked] = useState(false);
+    const [bookingRef, setBookingRef] = useState('');
 
+    const [loading, setLoading] = useState(true);
+    const [bookingStatus, setBookingStatus] = useState<'idle' | 'pricing' | 'itinerary' | 'paying' | 'complete' | 'error'>('pricing');
+    const [flightData, setFlightData] = useState<any>(null);
+    const [errorMessage, setErrorMessage] = useState('');
+
+    // Seat Selection
+    const [isSeatModalOpen, setIsSeatModalOpen] = useState(false);
+    const [seatLayout, setSeatLayout] = useState<any>(null);
+    const [loadingSeats, setLoadingSeats] = useState(false);
+    const [selectedSeats, setSelectedSeats] = useState<Record<number, string>>({}); // passengerId -> seatNumber
+
+    // SSR (Special Service Requests)
+    const [selectedSSR, setSelectedSSR] = useState<{
+        baggage: any[];
+        meals: any[];
+    }>({ baggage: [], meals: [] });
+    const [ssrTotal, setSSRTotal] = useState(0);
+
+    // Initialize passengers and flight data from Store
+    useEffect(() => {
+        console.log("📋 Booking page loaded. TUI:", tui);
+
+        if (!tui) {
+            console.warn("⚠️ No TUI found, redirecting home");
+            router.push('/');
+            return;
+        }
+
+        console.log("✅ Passenger count from store:", { adults, children, infants });
+
+        // Create passenger forms based on search counts
+        const passengerForms: Passenger[] = [];
+        let id = 1;
+
+        // Add adult passengers
+        for (let i = 0; i < adults; i++) {
+            passengerForms.push({
+                id: id++,
+                title: 'Mr',
+                firstName: '',
+                lastName: '',
+                dob: '',
+                gender: 'M',
+                nationality: 'IN',
+                passportNumber: '',
+                passportExpiry: '',
+                visaType: 'Visiting Visa',
+                type: 'ADT'
+            });
+        }
+
+        // Add child passengers
+        for (let i = 0; i < children; i++) {
+            passengerForms.push({
+                id: id++,
+                title: 'Master',
+                firstName: '',
+                lastName: '',
+                dob: '',
+                gender: 'M',
+                nationality: 'IN',
+                passportNumber: '',
+                passportExpiry: '',
+                visaType: 'None',
+                type: 'CHD'
+            });
+        }
+
+        // Add infant passengers
+        for (let i = 0; i < infants; i++) {
+            passengerForms.push({
+                id: id++,
+                title: 'Infant',
+                firstName: '',
+                lastName: '',
+                dob: '',
+                gender: 'M',
+                nationality: 'IN',
+                passportNumber: '',
+                passportExpiry: '',
+                visaType: 'None',
+                type: 'INF'
+            });
+        }
+
+        setPassengers(passengerForms);
+
+        // Load flight data from store for instant UI
+        if (selectedFlight) {
+            console.log("✅ Flight data loaded from store:", selectedFlight);
+            setFlightData(selectedFlight);
+            setLoading(false);
+        } else {
+            console.warn("⚠️ No selected flight in store found");
+            // Fallback: try session storage just in case (legacy support for manual refresh if not persisted fully properly yet)
+            const cached = sessionStorage.getItem('selectedFlight');
+            if (cached) {
+                try {
+                    setFlightData(JSON.parse(cached));
+                    setLoading(false);
+                } catch (e) { }
+            }
+        }
+
+        fetchPricing();
+    }, [tui]);
+
+    /* -------------------- GET SPRICER — direct call, no polling -------------------- */
+    const fetchPricing = async () => {
+        try {
+            setBookingStatus('pricing');
+            if (!flightData) setLoading(true);
+
+            const clientId = flightApi.getStoredClientId();
+            // GetSPricer is a direct call — pass the Price TUI from SmartPricer
+            const results = await flightApi.getSPricer(clientId, tui!);
+
+            if (results?.Code === "200") {
+                // Merge confirmed price into existing flightData if cached, else use response directly
+                setFlightData((prev: any) => ({
+                    ...prev,
+                    NetFare: results.NetAmount || prev?.NetFare,
+                    GrossFare: results.GrossFare || prev?.GrossFare
+                }));
+                setBookingStatus('idle');
+                setLoading(false);
+            } else {
+                throw new Error(results?.Msg?.[0] || "Failed to validate flight price");
+            }
+        } catch (error: any) {
+            console.error("Pricing failed", error);
+            const errorMsg = error.message || "Failed to validate flight price";
+
+            // Check if it's an expired session error
+            if (errorMsg.includes("No Data Found") || errorMsg.includes("expired")) {
+                setErrorMessage("⏰ This booking session has expired. Redirecting to search...");
+                setBookingStatus('error');
+                setLoading(false);
+
+                // Clear stale session data
+                sessionStorage.removeItem('selectedFlight');
+                sessionStorage.removeItem('bookingPassengers');
+                sessionStorage.removeItem('bookingContact');
+                sessionStorage.removeItem('bookingSSR');
+                sessionStorage.removeItem('ssrTotal');
+
+                // Redirect to search after 2 seconds
+                setTimeout(() => {
+                    router.push('/');
+                }, 2000);
+            } else {
+                setBookingStatus('error');
+                setErrorMessage(errorMsg);
+                setLoading(false);
+            }
+        }
+    };
+
+    /* -------------------- SSR Selection Change Handler -------------------- */
+    const handleSSRChange = (selection: { baggage: any[], meals: any[] }, totalCost: number) => {
+        setSelectedSSR(selection);
+        setSSRTotal(totalCost);
+        console.log("🎒 SSR Selection Updated:", selection, "Total:", totalCost);
+    };
+
+    /* -------------------- PASSENGER HELPERS -------------------- */
     const addPassenger = () => {
         const newId = passengers.length + 1;
         setPassengers([...passengers, {
@@ -37,9 +215,13 @@ export default function BookingPage() {
             title: 'Mr',
             firstName: '',
             lastName: '',
-            nationality: '',
+            dob: '',
+            gender: 'M',
+            nationality: 'IN',
             passportNumber: '',
-            type: 'Adult'
+            passportExpiry: '',
+            visaType: 'Visiting Visa',
+            type: 'ADT'
         }]);
     };
 
@@ -55,87 +237,132 @@ export default function BookingPage() {
         ));
     };
 
-    const handleBooking = () => {
-        setIsBooked(true);
-        // In a real app, this would submit to backend
-        setTimeout(() => {
-            // Navigate to confirmation or show ticket
-        }, 2000);
+    // Derive Age from DOB
+    const calcAge = (dob: string): number => {
+        if (!dob) return 30;
+        const today = new Date();
+        const birth = new Date(dob);
+        let age = today.getFullYear() - birth.getFullYear();
+        const m = today.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+        return age;
     };
 
-    if (isBooked) {
+    /* -------------------- CONTINUE TO REVIEW -------------------- */
+    const handleContinue = () => {
+        console.log("📝 Validating booking details...");
+
+        if (!contactEmail || !contactPhone) {
+            alert("Please fill in contact details");
+            return;
+        }
+
+        // Validate passengers (basic check)
+        const invalid = passengers.some(p => !p.firstName || !p.lastName || !p.dob);
+        if (invalid) {
+            alert("Please fill in all passenger details");
+            return;
+        }
+
+        // Calculate total SSR amount (ssrTotal is updated by SSRSelector component)
+        const seatTotal = Object.values(selectedSeats).reduce((sum: number, seat: any) =>
+            sum + (seat?.Price || 0), 0
+        );
+
+        const totalSSRAmount = ssrTotal + seatTotal;
+
+        // Save to session for review page
+        const passengersData = JSON.stringify(passengers);
+        const contactData = JSON.stringify({ email: contactEmail, phone: contactPhone });
+
+        sessionStorage.setItem('bookingPassengers', passengersData);
+        sessionStorage.setItem('bookingContact', contactData);
+        sessionStorage.setItem('bookingSSR', JSON.stringify({
+            baggage: selectedSSR.baggage,
+            meals: selectedSSR.meals,
+            seats: selectedSeats
+        }));
+        sessionStorage.setItem('ssrTotal', totalSSRAmount.toString());
+
+        console.log("✅ Saved to session:");
+        console.log("  - Passengers:", passengers.length, "travelers");
+        console.log("  - Contact:", { email: contactEmail, phone: contactPhone });
+        console.log("  - SSR Total:", totalSSRAmount);
+        console.log("  - Flight TUI:", tui);
+
+        const reviewUrl = `/flights/book/review?tui=${tui}`;
+        console.log("🚀 Navigating to review page:", reviewUrl);
+
+        router.push(reviewUrl);
+    };
+
+    /* -------------------- SEAT SELECTION -------------------- */
+    const handleOpenSeats = async () => {
+        setIsSeatModalOpen(true);
+        if (seatLayout) return; // already loaded
+
+        setLoadingSeats(true);
+        try {
+            const data = await flightApi.getSeatLayout(tui!);
+            setSeatLayout(data);
+        } catch (err) {
+            console.error("SeatLayout failed", err);
+        } finally {
+            setLoadingSeats(false);
+        }
+    };
+
+    const toggleSeat = (passengerId: number, seatNum: string) => {
+        setSelectedSeats(prev => ({ ...prev, [passengerId]: seatNum }));
+    };
+
+
+
+    const formatTime = (dateTime: string) => {
+        if (!dateTime) return 'N/A';
+        const time = dateTime.includes('T') ? dateTime.split('T')[1] : dateTime;
+        return time.substring(0, 5);
+    };
+
+    const isPricingInProgress = bookingStatus === 'pricing' && !flightData;
+
+    /* -------------------- LOADING -------------------- */
+    if (loading || isPricingInProgress) {
         return (
-            <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-                <Card className="max-w-2xl w-full border-none shadow-2xl rounded-3xl overflow-hidden bg-white">
-                    <div className="bg-emerald-500 p-6 flex flex-col items-center justify-center text-white">
-                        <CheckCircle className="h-16 w-16 mb-2 text-white/90" />
-                        <h2 className="text-3xl font-bold">Booking Confirmed</h2>
-                        <p className="text-emerald-100">PNR: XYA-882</p>
+            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+                <Loader2 className="h-12 w-12 animate-spin text-blue-600 mb-4" />
+                <h2 className="text-2xl font-semibold text-slate-800">Validating Fare...</h2>
+                <p className="text-slate-500">Checking latest availability and pricing</p>
+            </div>
+        );
+    }
+
+    /* -------------------- ERROR -------------------- */
+    if (bookingStatus === 'error') {
+        return (
+            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+                <Card className="max-w-md w-full p-8 text-center space-y-6">
+                    <div className="bg-red-50 h-20 w-20 rounded-full flex items-center justify-center mx-auto">
+                        <ArrowLeft className="h-10 w-10 text-red-500" />
                     </div>
-                    <CardContent className="p-8 space-y-8">
-                        <div className="text-center">
-                            <p className="text-slate-500 mb-1">E-tickets sent to</p>
-                            <p className="font-semibold text-lg text-slate-800">{contactEmail}</p>
-                        </div>
-
-                        {/* Minimal Ticket View */}
-                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                            <div className="flex justify-between items-center mb-6">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm">
-                                        <img src="https://images.kiwi.com/airlines/64/WY.png" alt="Oman Air" className="w-8 h-8 object-contain" />
-                                    </div>
-                                    <div>
-                                        <p className="font-bold text-slate-800">Oman Air</p>
-                                        <p className="text-xs text-slate-400">WY212 • Economy</p>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-xs text-slate-400">Date</p>
-                                    <p className="font-bold text-slate-800">13 Aug, 2025</p>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-between items-center mb-6">
-                                <div>
-                                    <p className="text-3xl font-bold text-slate-800">TRV</p>
-                                    <p className="text-xs text-slate-400">08:45 AM</p>
-                                </div>
-                                <div className="flex flex-col items-center px-4 flex-1">
-                                    <div className="w-full h-px bg-slate-300 relative">
-                                        <Plane className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-4 w-4 bg-slate-50 rotate-90 text-slate-400" />
-                                    </div>
-                                    <p className="text-xs text-slate-400 mt-2">1h 55m</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-3xl font-bold text-slate-800">DXB</p>
-                                    <p className="text-xs text-slate-400">09:10 AM</p>
-                                </div>
-                            </div>
-
-                            <Separator className="mb-4" />
-
-                            <div className="space-y-2">
-                                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Passengers</p>
-                                {passengers.map(p => (
-                                    <p key={p.id} className="text-sm font-medium text-slate-700">
-                                        {p.title} {p.firstName} {p.lastName}
-                                    </p>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="flex gap-4">
-                            <Button className="flex-1 h-12 bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow-lg shadow-slate-200" onClick={() => router.push('/agent')}>
-                                Back to Dashboard
-                            </Button>
-                        </div>
-                    </CardContent>
+                    <div>
+                        <h2 className="text-2xl font-bold text-slate-900">Oops! Something went wrong</h2>
+                        <p className="text-slate-500 mt-2">{errorMessage}</p>
+                    </div>
+                    <div className="flex flex-col gap-3">
+                        <Button className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white rounded-xl" onClick={() => fetchPricing()}>
+                            Retry Validation
+                        </Button>
+                        <Button variant="outline" className="w-full h-12 border-slate-200 rounded-xl" onClick={() => router.back()}>
+                            Go Back
+                        </Button>
+                    </div>
                 </Card>
             </div>
         );
     }
 
+    /* -------------------- MAIN BOOKING FORM -------------------- */
     return (
         <div className="min-h-screen bg-slate-50 py-12 px-4 font-sans">
             <div className="container mx-auto max-w-6xl">
@@ -146,13 +373,18 @@ export default function BookingPage() {
                             <ArrowLeft className="h-5 w-5 text-slate-700" />
                         </Button>
                         <div>
-                            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Booking Details</h1>
-                            <p className="text-slate-500 font-medium">Secure your journey to Dubai</p>
+                            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Traveller Details</h1>
+                            <div className="flex items-center gap-2">
+                                <p className="text-slate-500 font-medium">Step 1 of 2: Who is flying?</p>
+                            </div>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-slate-500 bg-white px-4 py-2 rounded-full shadow-sm">
-                        <ShieldCheck className="h-4 w-4 text-green-500" />
-                        <span>Secure SSL Transaction</span>
+                    <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-2 text-sm text-slate-500 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100 italic">
+                            <span className="flex items-center gap-1.5 text-emerald-600">
+                                <ShieldCheck className="h-4 w-4" /> Secure Booking
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -161,16 +393,25 @@ export default function BookingPage() {
                     <div className="lg:col-span-2 space-y-8">
                         {/* Passenger Forms */}
                         <div className="space-y-6">
-                            {passengers.map((passenger, index) => (
+                            {passengers.map((passenger, idx) => (
                                 <Card key={passenger.id} className="border-none shadow-md hover:shadow-lg transition-shadow bg-white rounded-2xl overflow-hidden">
                                     <CardHeader className="bg-slate-50/50 border-b border-slate-100 flex flex-row items-center justify-between py-4 px-6">
                                         <CardTitle className="text-lg font-bold flex items-center gap-2 text-slate-800">
-                                            <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
-                                                <User className="h-4 w-4 text-blue-600" />
+                                            <div className={`h-8 w-8 rounded-full flex items-center justify-center ${passenger.type === 'ADT' ? 'bg-blue-100' :
+                                                passenger.type === 'CHD' ? 'bg-green-100' : 'bg-amber-100'
+                                                }`}>
+                                                <User className={`h-4 w-4 ${passenger.type === 'ADT' ? 'text-blue-600' :
+                                                    passenger.type === 'CHD' ? 'text-green-600' : 'text-amber-600'
+                                                    }`} />
                                             </div>
-                                            Passenger {index + 1}
+                                            Passenger {idx + 1}
+                                            <Badge variant="secondary" className={`text-xs ${passenger.type === 'ADT' ? 'bg-blue-50 text-blue-700' :
+                                                passenger.type === 'CHD' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
+                                                }`}>
+                                                {passenger.type === 'ADT' ? 'Adult' : passenger.type === 'CHD' ? 'Child' : 'Infant'}
+                                            </Badge>
                                         </CardTitle>
-                                        {index > 0 && (
+                                        {idx > 0 && (
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
@@ -182,6 +423,7 @@ export default function BookingPage() {
                                         )}
                                     </CardHeader>
                                     <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {/* Title */}
                                         <div className="space-y-2">
                                             <Label className="text-slate-600 font-medium">Title</Label>
                                             <Select
@@ -199,23 +441,25 @@ export default function BookingPage() {
                                                 </SelectContent>
                                             </Select>
                                         </div>
+
+                                        {/* Gender */}
                                         <div className="space-y-2">
-                                            <Label className="text-slate-600 font-medium">Nationality</Label>
+                                            <Label className="text-slate-600 font-medium">Gender</Label>
                                             <Select
-                                                defaultValue="sa"
-                                                onValueChange={(val) => updatePassenger(passenger.id, 'nationality', val)}
+                                                defaultValue={passenger.gender}
+                                                onValueChange={(val) => updatePassenger(passenger.id, 'gender', val)}
                                             >
                                                 <SelectTrigger className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl">
-                                                    <SelectValue placeholder="Select Country" />
+                                                    <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="sa">Saudi Arabia</SelectItem>
-                                                    <SelectItem value="ae">UAE</SelectItem>
-                                                    <SelectItem value="us">USA</SelectItem>
-                                                    <SelectItem value="in">India</SelectItem>
+                                                    <SelectItem value="M">Male</SelectItem>
+                                                    <SelectItem value="F">Female</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
+
+                                        {/* First Name */}
                                         <div className="space-y-2">
                                             <Label className="text-slate-600 font-medium">First Name</Label>
                                             <Input
@@ -225,6 +469,8 @@ export default function BookingPage() {
                                                 onChange={(e) => updatePassenger(passenger.id, 'firstName', e.target.value)}
                                             />
                                         </div>
+
+                                        {/* Last Name */}
                                         <div className="space-y-2">
                                             <Label className="text-slate-600 font-medium">Last Name</Label>
                                             <Input
@@ -234,14 +480,81 @@ export default function BookingPage() {
                                                 onChange={(e) => updatePassenger(passenger.id, 'lastName', e.target.value)}
                                             />
                                         </div>
-                                        <div className="space-y-2 md:col-span-2">
-                                            <Label className="text-slate-600 font-medium">Passport Number</Label>
+
+                                        {/* DOB */}
+                                        <div className="space-y-2">
+                                            <Label className="text-slate-600 font-medium">Date of Birth</Label>
                                             <Input
                                                 className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
-                                                placeholder="Enter Valid Passport Number"
+                                                type="date"
+                                                value={passenger.dob}
+                                                onChange={(e) => updatePassenger(passenger.id, 'dob', e.target.value)}
+                                            />
+                                        </div>
+
+                                        {/* Nationality */}
+                                        <div className="space-y-2">
+                                            <Label className="text-slate-600 font-medium">Nationality</Label>
+                                            <Select
+                                                defaultValue={passenger.nationality}
+                                                onValueChange={(val) => updatePassenger(passenger.id, 'nationality', val)}
+                                            >
+                                                <SelectTrigger className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl">
+                                                    <SelectValue placeholder="Select Country" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="IN">India</SelectItem>
+                                                    <SelectItem value="SA">Saudi Arabia</SelectItem>
+                                                    <SelectItem value="AE">UAE</SelectItem>
+                                                    <SelectItem value="US">USA</SelectItem>
+                                                    <SelectItem value="UK">UK</SelectItem>
+                                                    <SelectItem value="CA">Canada</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        {/* Passport Number (PLI) - Mandatory for Adults */}
+                                        <div className="space-y-2">
+                                            <Label className="text-slate-600 font-medium">Passport / ID Number <span className="text-red-500">*</span></Label>
+                                            <Input
+                                                className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
+                                                placeholder="Required for Adults"
                                                 value={passenger.passportNumber}
                                                 onChange={(e) => updatePassenger(passenger.id, 'passportNumber', e.target.value)}
                                             />
+                                        </div>
+
+                                        {/* Passport Expiry */}
+                                        <div className="space-y-2">
+                                            <Label className="text-slate-600 font-medium">Passport Expiry</Label>
+                                            <Input
+                                                className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
+                                                type="date"
+                                                value={passenger.passportExpiry}
+                                                onChange={(e) => updatePassenger(passenger.id, 'passportExpiry', e.target.value)}
+                                            />
+                                        </div>
+
+
+
+                                        {/* Visa Type */}
+                                        <div className="space-y-2 md:col-span-2">
+                                            <Label className="text-slate-600 font-medium">Visa Type</Label>
+                                            <Select
+                                                defaultValue={passenger.visaType}
+                                                onValueChange={(val) => updatePassenger(passenger.id, 'visaType', val)}
+                                            >
+                                                <SelectTrigger className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Visiting Visa">Visiting Visa</SelectItem>
+                                                    <SelectItem value="Work Visa">Work Visa</SelectItem>
+                                                    <SelectItem value="Student Visa">Student Visa</SelectItem>
+                                                    <SelectItem value="Transit Visa">Transit Visa</SelectItem>
+                                                    <SelectItem value="None">Not Required</SelectItem>
+                                                </SelectContent>
+                                            </Select>
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -251,7 +564,7 @@ export default function BookingPage() {
                         {/* Add Passenger Button */}
                         <Button
                             variant="ghost"
-                            className="w-full h-16 border-2 border-dashed border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-all rounded-2xl font-semibold  text-lg"
+                            className="w-full h-16 border-2 border-dashed border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-all rounded-2xl font-semibold text-lg"
                             onClick={addPassenger}
                         >
                             <Plus className="h-5 w-5 mr-2" /> Add Another Passenger
@@ -283,11 +596,53 @@ export default function BookingPage() {
                                     <Input
                                         className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
                                         type="tel"
-                                        placeholder="+966 5..."
+                                        placeholder="+91 9..."
                                         value={contactPhone}
                                         onChange={(e) => setContactPhone(e.target.value)}
                                     />
                                 </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* SSR (Extra Services) - Using SSRSelector Component */}
+                        {tui && (
+                            <SSRSelector
+                                tui={tui}
+                                onSelectionChange={handleSSRChange}
+                                initialSelection={selectedSSR}
+                            />
+                        )}
+
+                        {/* Seat Selection Card */}
+                        <Card className="border-none shadow-md bg-white rounded-2xl overflow-hidden">
+                            <CardHeader className="bg-slate-50/50 border-b border-slate-100 py-4 px-6 flex flex-row items-center justify-between">
+                                <CardTitle className="text-lg font-bold flex items-center gap-2 text-slate-800">
+                                    <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                                        <Armchair className="h-4 w-4 text-blue-600" />
+                                    </div>
+                                    Seat Selection
+                                </CardTitle>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50"
+                                    onClick={handleOpenSeats}
+                                >
+                                    {Object.keys(selectedSeats).length > 0 ? 'Change Seats' : 'Select Seats'}
+                                </Button>
+                            </CardHeader>
+                            <CardContent className="p-6">
+                                {Object.keys(selectedSeats).length > 0 ? (
+                                    <div className="flex flex-wrap gap-3">
+                                        {passengers.map(p => selectedSeats[p.id] && (
+                                            <Badge key={p.id} variant="secondary" className="bg-blue-50 text-blue-700 border-blue-100 py-1.5 px-3">
+                                                P{p.id}: {selectedSeats[p.id]}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-slate-500 italic">No seats selected yet. Choose your preferred seats for a better journey.</p>
+                                )}
                             </CardContent>
                         </Card>
                     </div>
@@ -295,75 +650,54 @@ export default function BookingPage() {
                     {/* Right Column: Summary */}
                     <div className="lg:col-span-1">
                         <div className="sticky top-8 space-y-6">
-                            {/* Flight Summary Card */}
                             <Card className="border-none shadow-xl bg-white rounded-3xl overflow-hidden ring-1 ring-slate-100">
                                 <div className="bg-slate-900 p-6 text-white pb-10 relative">
                                     <div className="absolute top-0 right-0 p-3 opacity-10">
                                         <Plane className="h-32 w-32 rotate-12" />
                                     </div>
-                                    <p className="text-sm font-medium text-slate-300 mb-1">Outbound Flight</p>
+                                    <p className="text-sm font-medium text-slate-300 mb-1">Flight Route</p>
                                     <div className="flex justify-between items-end relative z-10">
                                         <div>
-                                            <p className="text-4xl font-bold">TRV</p>
-                                            <p className="text-slate-400">Thiruvananthapuram</p>
+                                            <p className="text-4xl font-bold">{flightData?.From}</p>
                                         </div>
                                         <div className="mb-2">
                                             <Plane className="h-6 w-6 text-slate-400 rotate-90" />
                                         </div>
                                         <div className="text-right">
-                                            <p className="text-4xl font-bold">DXB</p>
-                                            <p className="text-slate-400">Dubai</p>
+                                            <p className="text-4xl font-bold">{flightData?.To}</p>
                                         </div>
                                     </div>
                                 </div>
                                 <CardContent className="pt-0 relative px-6 pb-6">
                                     <div className="bg-white rounded-xl shadow-lg -mt-6 p-4 border border-slate-100 relative z-20">
                                         <div className="flex items-center gap-3 mb-3 pb-3 border-b border-slate-100">
-                                            <img src="https://images.kiwi.com/airlines/64/WY.png" alt="Oman Air" className="h-8 w-8 object-contain" />
+                                            <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center">
+                                                <Plane className="h-4 w-4 text-blue-600" />
+                                            </div>
                                             <div>
-                                                <p className="font-bold text-slate-800 text-sm">Oman Air</p>
-                                                <p className="text-xs text-slate-500">WY212 • Economy</p>
+                                                <p className="font-bold text-slate-800 text-sm">{flightData?.AirlineName?.split('|')[0] || 'Airline'}</p>
+                                                <p className="text-xs text-slate-500">{flightData?.FlightNo} • {flightData?.Cabin === 'E' ? 'Economy' : 'Business'}</p>
                                             </div>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <div>
-                                                <p className="text-slate-400 text-xs">Departure</p>
-                                                <p className="font-semibold text-slate-800">13 Aug • 08:45</p>
-                                            </div>
-                                            <div className="text-right">
-                                                <p className="text-slate-400 text-xs">Arrival</p>
-                                                <p className="font-semibold text-slate-800">13 Aug • 09:10</p>
-                                            </div>
+                                            <p className="font-semibold text-slate-800">{formatTime(flightData?.DepartureTime)}</p>
+                                            <p className="font-semibold text-slate-800">{formatTime(flightData?.ArrivalTime)}</p>
                                         </div>
                                     </div>
 
                                     <div className="mt-6 space-y-4">
-                                        <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                                            <CreditCard className="h-4 w-4" /> Price Breakdown
-                                        </h3>
-                                        <div className="space-y-2 text-sm">
-                                            <div className="flex justify-between text-slate-600">
-                                                <span>Adult x {passengers.length}</span>
-                                                <span>{(892 * passengers.length).toLocaleString()} SAR</span>
-                                            </div>
-                                            <div className="flex justify-between text-slate-600">
-                                                <span>Taxes & Fees</span>
-                                                <span>{(150 * passengers.length).toLocaleString()} SAR</span>
-                                            </div>
-                                        </div>
-                                        <Separator />
                                         <div className="flex justify-between items-center">
                                             <span className="font-bold text-slate-700">Total Amount</span>
                                             <span className="font-bold text-2xl text-blue-600">
-                                                {((892 + 150) * passengers.length).toLocaleString()} <span className="text-sm font-normal text-slate-500">SAR</span>
+                                                {(flightData?.NetFare || flightData?.GrossFare || 0).toLocaleString()} <span className="text-sm font-normal text-slate-500">INR</span>
                                             </span>
                                         </div>
 
                                         <Button
                                             className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white text-lg font-bold rounded-xl shadow-lg shadow-slate-900/10 mt-2 transition-transform hover:scale-[1.01] active:scale-[0.99]"
-                                            onClick={handleBooking}
+                                            onClick={handleContinue}
                                         >
-                                            Pay & Book Now
+                                            Continue to Review <ChevronRight className="ml-2 h-5 w-5" />
                                         </Button>
                                     </div>
                                 </CardContent>
@@ -372,6 +706,94 @@ export default function BookingPage() {
                     </div>
                 </div>
             </div>
+
+            {/* SEAT SELECTION MODAL */}
+            {isSeatModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
+                        <div className="bg-slate-50 px-8 py-6 border-b flex items-center justify-between">
+                            <div>
+                                <h3 className="text-2xl font-bold text-slate-800 tracking-tight">Select Your Seats</h3>
+                                <p className="text-slate-500 text-sm font-medium">Click on a seat to assign to the current passenger</p>
+                            </div>
+                            <button onClick={() => setIsSeatModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                                <X className="w-6 h-6 text-slate-500" />
+                            </button>
+                        </div>
+
+                        <div className="p-8 overflow-y-auto flex-1 bg-slate-50/30">
+                            {loadingSeats ? (
+                                <div className="flex flex-col items-center justify-center py-20">
+                                    <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                                    <p className="text-slate-500 font-bold">Loading aircraft configuration...</p>
+                                </div>
+                            ) : seatLayout ? (
+                                <div className="grid grid-cols-7 gap-3 py-6">
+                                    {['A', 'B', 'C', '', 'D', 'E', 'F'].map((l: string, i: number) => (
+                                        <div key={i} className="text-center text-[10px] font-bold text-slate-400">{l}</div>
+                                    ))}
+
+                                    {/* Rows 1-15 */}
+                                    {Array.from({ length: 15 }).map((_, rowIndex) => (
+                                        <React.Fragment key={rowIndex}>
+                                            {[0, 1, 2].map(colIndex => {
+                                                const seatId = `${rowIndex + 1}${'ABC'[colIndex]}`;
+                                                const isOccupied = Math.random() > 0.8;
+                                                const isSelected = Object.values(selectedSeats).includes(seatId);
+                                                return (
+                                                    <button
+                                                        key={colIndex}
+                                                        disabled={isOccupied}
+                                                        onClick={() => toggleSeat(1, seatId)}
+                                                        className={`h-10 rounded-lg flex items-center justify-center text-xs font-bold transition-all
+                                                                    ${isOccupied ? 'bg-slate-100 text-slate-300 cursor-not-allowed' :
+                                                                isSelected ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 ring-2 ring-blue-400 scale-110' :
+                                                                    'bg-white text-slate-600 border border-slate-200 hover:border-blue-400 hover:text-blue-600 shadow-sm'}`}
+                                                    >
+                                                        {rowIndex + 1}
+                                                    </button>
+                                                );
+                                            })}
+                                            <div className="flex items-center justify-center text-[10px] font-bold text-slate-300">{rowIndex + 1}</div>
+                                            {[3, 4, 5].map(colIndex => {
+                                                const seatId = `${rowIndex + 1}${'DEF'[colIndex - 3]}`;
+                                                const isOccupied = Math.random() > 0.8;
+                                                const isSelected = Object.values(selectedSeats).includes(seatId);
+                                                return (
+                                                    <button
+                                                        key={colIndex}
+                                                        disabled={isOccupied}
+                                                        onClick={() => toggleSeat(1, seatId)}
+                                                        className={`h-10 rounded-lg flex items-center justify-center text-xs font-bold transition-all
+                                                                    ${isOccupied ? 'bg-slate-100 text-slate-300 cursor-not-allowed' :
+                                                                isSelected ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 ring-2 ring-blue-400 scale-110' :
+                                                                    'bg-white text-slate-600 border border-slate-200 hover:border-blue-400 hover:text-blue-600 shadow-sm'}`}
+                                                    >
+                                                        {rowIndex + 1}
+                                                    </button>
+                                                );
+                                            })}
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-20 text-slate-500">Seat layout unavailable for this flight. Please try again later.</div>
+                            )}
+                        </div>
+
+                        <div className="px-8 py-6 bg-white border-t flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 rounded bg-white border border-slate-300" /> <span className="text-xs text-slate-500">Available</span>
+                                <div className="w-4 h-4 rounded bg-slate-100" /> <span className="text-xs text-slate-500">Occupied</span>
+                                <div className="w-4 h-4 rounded bg-blue-600" /> <span className="text-xs text-slate-500">Selected</span>
+                            </div>
+                            <Button onClick={() => setIsSeatModalOpen(false)} className="rounded-2xl px-10 h-12 bg-slate-900 hover:bg-slate-800 text-lg shadow-xl shadow-slate-200">
+                                Confirm Seats
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
