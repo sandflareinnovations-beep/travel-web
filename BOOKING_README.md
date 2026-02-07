@@ -1,6 +1,9 @@
 # FLYINCO Flight & Hotel Booking Platform
 
 ## 🎉 What Has Been Built
+Navigate to the frontend directory.
+Run npm run dev to start the Next.js development server.
+The frontend will run on port 3000.
 
 A premium, modern flight and hotel booking platform with stunning visual design and comprehensive booking features.
 

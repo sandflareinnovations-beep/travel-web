@@ -42,6 +42,7 @@ const MOCK_BOOKINGS = [
 ];
 
 export function DashboardOverview() {
+    const [mounted, setMounted] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [chartData, setChartData] = useState(generateChartData());
     const [stats, setStats] = useState({
@@ -50,6 +51,10 @@ export function DashboardOverview() {
         activeStaff: 24,
         avgTicket: 1850
     });
+
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
     const handleRefresh = () => {
         setIsRefreshing(true);
@@ -65,6 +70,8 @@ export function DashboardOverview() {
             setIsRefreshing(false);
         }, 1000);
     };
+
+    if (!mounted) return null;
 
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -153,8 +160,8 @@ export function DashboardOverview() {
                         <CardDescription>Monthly performance overview (SAR)</CardDescription>
                     </CardHeader>
                     <CardContent className="pl-0">
-                        <div className="h-[350px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
+                        <div className="h-[350px] w-full relative">
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                                 <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                                     <defs>
                                         <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
