@@ -60,16 +60,31 @@ export default function BookingPage() {
     }>({ baggage: [], meals: [] });
     const [ssrTotal, setSSRTotal] = useState(0);
 
+    // Validation Errors State
+    const [errors, setErrors] = useState<{
+        passengers: Record<number, Partial<Record<keyof Passenger, string>>>;
+        contact: { email?: string; phone?: string; };
+    }>({ passengers: {}, contact: {} });
+
+    // Prevent double execution in Strict Mode
+    const processedTuiRef = React.useRef<string | null>(null);
+
     // Initialize passengers and flight data from Store
     useEffect(() => {
-        console.log("📋 Booking page loaded. TUI:", tui);
-
         if (!tui) {
             console.warn("⚠️ No TUI found, redirecting home");
             router.push('/');
             return;
         }
 
+        // Prevent running twice for the same TUI (Strict Mode fix)
+        if (processedTuiRef.current === tui) {
+            console.log("Skipping duplicate initialization for TUI:", tui);
+            return;
+        }
+        processedTuiRef.current = tui;
+
+        console.log("📋 Booking page loaded. TUI:", tui);
         console.log("✅ Passenger count from store:", { adults, children, infants });
 
         // Create passenger forms based on search counts
@@ -136,7 +151,7 @@ export default function BookingPage() {
             setLoading(false);
         } else {
             console.warn("⚠️ No selected flight in store found");
-            // Fallback: try session storage just in case (legacy support for manual refresh if not persisted fully properly yet)
+            // Fallback: try session storage just in case
             const cached = sessionStorage.getItem('selectedFlight');
             if (cached) {
                 try {
@@ -147,7 +162,7 @@ export default function BookingPage() {
         }
 
         fetchPricing();
-    }, [tui]);
+    }, [tui, adults, children, infants, selectedFlight, router]);
 
     /* -------------------- GET SPRICER — direct call, no polling -------------------- */
     const fetchPricing = async () => {
@@ -163,9 +178,68 @@ export default function BookingPage() {
                 // Merge confirmed price into existing flightData if cached, else use response directly
                 setFlightData((prev: any) => ({
                     ...prev,
+                    ...results, // Merge full response including SSRs, Trips, etc.
                     NetFare: results.NetAmount || prev?.NetFare,
                     GrossFare: results.GrossFare || prev?.GrossFare
                 }));
+
+                // SYNC PASSENGERS WITH API COUNTS
+                // If the user changed the search inputs but didn't search again, the Store might have more pax than the TUI.
+                // We must align with the TUI/Pricing response.
+                const apiADT = Number(results.ADT || 0);
+                const apiCHD = Number(results.CHD || 0);
+                const apiINF = Number(results.INF || 0);
+
+                setPassengers(prev => {
+                    const currentADT = prev.filter(p => p.type === 'ADT');
+                    const currentCHD = prev.filter(p => p.type === 'CHD');
+                    const currentINF = prev.filter(p => p.type === 'INF');
+
+                    let newPassengers: any[] = [];
+                    let hasChanged = false;
+
+                    // Helper to sync specific type
+                    const syncType = (current: any[], targetAccount: number, type: string) => {
+                        if (current.length === targetAccount) {
+                            newPassengers.push(...current);
+                        } else if (current.length < targetAccount) {
+                            // Add missing
+                            hasChanged = true;
+                            newPassengers.push(...current);
+                            for (let i = 0; i < targetAccount - current.length; i++) {
+                                newPassengers.push({
+                                    id: Date.now() + Math.random(), // Temp ID
+                                    title: type === 'ADT' ? 'Mr' : 'Master',
+                                    firstName: '',
+                                    lastName: '',
+                                    dob: '',
+                                    gender: 'M',
+                                    nationality: 'IN',
+                                    passportNumber: '',
+                                    passportExpiry: '',
+                                    visaType: 'Visiting Visa',
+                                    type: type
+                                });
+                            }
+                        } else {
+                            // Remove excess
+                            hasChanged = true;
+                            newPassengers.push(...current.slice(0, targetAccount));
+                        }
+                    };
+
+                    syncType(currentADT, apiADT, 'ADT');
+                    syncType(currentCHD, apiCHD, 'CHD');
+                    syncType(currentINF, apiINF, 'INF');
+
+                    if (hasChanged) {
+                        console.log("⚠️ Passenger counts synced with API:", { apiADT, apiCHD, apiINF });
+                        // Re-index IDs to be safe/clean
+                        return newPassengers.map((p, index) => ({ ...p, id: index + 1 }));
+                    }
+                    return prev;
+                });
+
                 setBookingStatus('idle');
                 setLoading(false);
             } else {
@@ -235,6 +309,20 @@ export default function BookingPage() {
         setPassengers(passengers.map(p =>
             p.id === id ? { ...p, [field]: value } : p
         ));
+
+        // Clear error when user types
+        if (errors.passengers[id]?.[field]) {
+            setErrors(prev => ({
+                ...prev,
+                passengers: {
+                    ...prev.passengers,
+                    [id]: {
+                        ...prev.passengers[id],
+                        [field]: undefined
+                    }
+                }
+            }));
+        }
     };
 
     // Derive Age from DOB
@@ -251,16 +339,57 @@ export default function BookingPage() {
     /* -------------------- CONTINUE TO REVIEW -------------------- */
     const handleContinue = () => {
         console.log("📝 Validating booking details...");
+        let isValid = true;
+        const newErrors: typeof errors = { passengers: {}, contact: {} };
 
-        if (!contactEmail || !contactPhone) {
-            alert("Please fill in contact details");
-            return;
+        // 1. Validate Contact Details
+        if (!contactEmail) {
+            newErrors.contact.email = "Email is required";
+            isValid = false;
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+            newErrors.contact.email = "Invalid email address";
+            isValid = false;
         }
 
-        // Validate passengers (basic check)
-        const invalid = passengers.some(p => !p.firstName || !p.lastName || !p.dob);
-        if (invalid) {
-            alert("Please fill in all passenger details");
+        if (!contactPhone) {
+            newErrors.contact.phone = "Phone number is required";
+            isValid = false;
+        } else if (!/^\d+$/.test(contactPhone)) {
+            newErrors.contact.phone = "Phone number must contain only digits";
+            isValid = false;
+        }
+
+        // 2. Validate Passengers
+        const nameRegex = /^[A-Za-z]+$/;
+
+        passengers.forEach(p => {
+            const pErrors: Partial<Record<keyof Passenger, string>> = {};
+
+            if (!p.firstName) pErrors.firstName = "First Name is required";
+            else if (!nameRegex.test(p.firstName)) pErrors.firstName = "Alphabets only";
+
+            if (!p.lastName) pErrors.lastName = "Last Name is required";
+            else if (!nameRegex.test(p.lastName)) pErrors.lastName = "Alphabets only";
+
+            if (!p.dob) pErrors.dob = "Date of Birth is required";
+
+            if (p.type === 'ADT') {
+                if (!p.passportNumber) pErrors.passportNumber = "Passport Number is required";
+                // if (!p.passportExpiry) pErrors.passportExpiry = "Passport Expiry is required"; // strictly speaking mostly needed
+            }
+
+            if (Object.keys(pErrors).length > 0) {
+                newErrors.passengers[p.id] = pErrors;
+                isValid = false;
+            }
+        });
+
+        setErrors(newErrors);
+
+        if (!isValid) {
+            console.warn("❌ Validation failed", newErrors);
+            // Scroll to top or first error could be nice, but simple alert fallback or just UI update is okay.
+            alert("Please fix the errors highlighted in red.");
             return;
         }
 
@@ -284,11 +413,18 @@ export default function BookingPage() {
         }));
         sessionStorage.setItem('ssrTotal', totalSSRAmount.toString());
 
+        // Critical Fix: Save the LATEST flight data (with updated pricing from GetSPricer) to session
+        // Only if flightData is available to avoid overwriting with null
+        if (flightData) {
+            sessionStorage.setItem('selectedFlight', JSON.stringify(flightData));
+        }
+
         console.log("✅ Saved to session:");
         console.log("  - Passengers:", passengers.length, "travelers");
         console.log("  - Contact:", { email: contactEmail, phone: contactPhone });
         console.log("  - SSR Total:", totalSSRAmount);
         console.log("  - Flight TUI:", tui);
+        console.log("  - Updated Price (NetFare):", flightData?.NetFare);
 
         const reviewUrl = `/flights/book/review?tui=${tui}`;
         console.log("🚀 Navigating to review page:", reviewUrl);
@@ -325,6 +461,45 @@ export default function BookingPage() {
     };
 
     const isPricingInProgress = bookingStatus === 'pricing' && !flightData;
+
+    /* -------------------- DUMMY DATA FILLER -------------------- */
+    const fillDummyData = () => {
+        const dummyPassengers = passengers.map((p) => {
+            const isAdult = p.type === 'ADT';
+            const isChild = p.type === 'CHD';
+
+            // Generate random alphabet string (5 characters)
+            /* 
+               Math.random().toString(36) includes numbers. 
+               We need pure alphabets to pass validation "Adult Traveler First Name Can only enter alphabets".
+            */
+            const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+            let randomStr = "";
+            for (let i = 0; i < 5; i++) {
+                randomStr += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+            }
+
+            return {
+                ...p,
+                title: isAdult ? (p.gender === 'M' ? 'Mr' : 'Ms') : (isChild ? 'Master' : 'Miss'),
+                firstName: `Test${p.type}${randomStr}`,
+                lastName: 'User',
+                dob: isAdult ? '1990-01-01' : (isChild ? '2015-01-01' : '2023-01-01'),
+                gender: p.gender,
+                nationality: 'IN',
+                passportNumber: isAdult ? `P${Math.floor(Math.random() * 10000000)}` : '',
+                passportExpiry: isAdult ? '2030-01-01' : '',
+                visaType: 'None',
+                // email/phone are in contact state, not passenger object usually, 
+                // but if we are mapping them, we can keep them or remove if unused in Passenger type.
+                // The interface Passenger doesn't have email/phone, but let's keep it safe.
+            };
+        });
+
+        setPassengers(dummyPassengers);
+        setContactEmail('test@example.com');
+        setContactPhone('9999999999');
+    };
 
     /* -------------------- LOADING -------------------- */
     if (loading || isPricingInProgress) {
@@ -385,6 +560,15 @@ export default function BookingPage() {
                                 <ShieldCheck className="h-4 w-4" /> Secure Booking
                             </span>
                         </div>
+                        {/* DEV ONLY: Dummy Fill Button */}
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={fillDummyData}
+                            className="bg-purple-50 text-purple-600 border-purple-200 hover:bg-purple-100"
+                        >
+                            Fill Dummy Data
+                        </Button>
                     </div>
                 </div>
 
@@ -463,22 +647,28 @@ export default function BookingPage() {
                                         <div className="space-y-2">
                                             <Label className="text-slate-600 font-medium">First Name</Label>
                                             <Input
-                                                className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
+                                                className={`h-12 focus:ring-blue-500 rounded-xl ${errors.passengers[passenger.id]?.firstName ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                                 placeholder="As on passport"
                                                 value={passenger.firstName}
                                                 onChange={(e) => updatePassenger(passenger.id, 'firstName', e.target.value)}
                                             />
+                                            {errors.passengers[passenger.id]?.firstName && (
+                                                <p className="text-xs text-red-500 mt-1">{errors.passengers[passenger.id]?.firstName}</p>
+                                            )}
                                         </div>
 
                                         {/* Last Name */}
                                         <div className="space-y-2">
                                             <Label className="text-slate-600 font-medium">Last Name</Label>
                                             <Input
-                                                className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
+                                                className={`h-12 focus:ring-blue-500 rounded-xl ${errors.passengers[passenger.id]?.lastName ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                                 placeholder="As on passport"
                                                 value={passenger.lastName}
                                                 onChange={(e) => updatePassenger(passenger.id, 'lastName', e.target.value)}
                                             />
+                                            {errors.passengers[passenger.id]?.lastName && (
+                                                <p className="text-xs text-red-500 mt-1">{errors.passengers[passenger.id]?.lastName}</p>
+                                            )}
                                         </div>
 
                                         {/* DOB */}
@@ -517,11 +707,14 @@ export default function BookingPage() {
                                         <div className="space-y-2">
                                             <Label className="text-slate-600 font-medium">Passport / ID Number <span className="text-red-500">*</span></Label>
                                             <Input
-                                                className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
+                                                className={`h-12 focus:ring-blue-500 rounded-xl ${errors.passengers[passenger.id]?.passportNumber ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                                 placeholder="Required for Adults"
                                                 value={passenger.passportNumber}
                                                 onChange={(e) => updatePassenger(passenger.id, 'passportNumber', e.target.value)}
                                             />
+                                            {errors.passengers[passenger.id]?.passportNumber && (
+                                                <p className="text-xs text-red-500 mt-1">{errors.passengers[passenger.id]?.passportNumber}</p>
+                                            )}
                                         </div>
 
                                         {/* Passport Expiry */}
@@ -584,34 +777,63 @@ export default function BookingPage() {
                                 <div className="space-y-2">
                                     <Label className="text-slate-600 font-medium">Email Address</Label>
                                     <Input
-                                        className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
+                                        className={`h-12 focus:ring-blue-500 rounded-xl ${errors.contact.email ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                         type="email"
                                         placeholder="eticket@example.com"
                                         value={contactEmail}
-                                        onChange={(e) => setContactEmail(e.target.value)}
+                                        onChange={(e) => {
+                                            setContactEmail(e.target.value);
+                                            if (errors.contact.email) setErrors(prev => ({ ...prev, contact: { ...prev.contact, email: undefined } }));
+                                        }}
                                     />
+                                    {errors.contact.email && <p className="text-xs text-red-500 mt-1">{errors.contact.email}</p>}
                                 </div>
                                 <div className="space-y-2">
                                     <Label className="text-slate-600 font-medium">Phone Number</Label>
                                     <Input
-                                        className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
+                                        className={`h-12 focus:ring-blue-500 rounded-xl ${errors.contact.phone ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                         type="tel"
                                         placeholder="+91 9..."
                                         value={contactPhone}
-                                        onChange={(e) => setContactPhone(e.target.value)}
+                                        onChange={(e) => {
+                                            setContactPhone(e.target.value);
+                                            if (errors.contact.phone) setErrors(prev => ({ ...prev, contact: { ...prev.contact, phone: undefined } }));
+                                        }}
                                     />
+                                    {errors.contact.phone && <p className="text-xs text-red-500 mt-1">{errors.contact.phone}</p>}
                                 </div>
                             </CardContent>
                         </Card>
 
-                        {/* SSR (Extra Services) - Using SSRSelector Component */}
-                        {tui && (
+                        {/* SSR (Extra Services) - using data derived from GetSPricer */}
+                        {(flightData?.SSR || flightData?.Trips?.[0]?.Journey?.[0]?.Segments?.[0]?.SSR) && (
                             <SSRSelector
-                                tui={tui}
+                                baggage={
+                                    // Parse Baggage from flightData (Type 2)
+                                    (flightData.SSR || flightData.Trips[0].Journey[0].Segments[0].SSR || [])
+                                        .filter((item: any) => item.Type === "2" || item.Code?.includes("BAG"))
+                                        .map((item: any) => ({
+                                            ...item,
+                                            Price: item.Charge || item.Amount || 0,
+                                            // Fallback description if Weight is missing
+                                            Weight: item.Weight || item.Description
+                                        }))
+                                }
+                                meals={
+                                    // Parse Meals from flightData (Type 1)
+                                    (flightData.SSR || flightData.Trips[0].Journey[0].Segments[0].SSR || [])
+                                        .filter((item: any) => item.Type === "1" || item.Code?.includes("MEAL"))
+                                        .map((item: any) => ({
+                                            ...item,
+                                            Price: item.Charge || item.Amount || 0,
+                                            Name: item.Name || item.Description
+                                        }))
+                                }
                                 onSelectionChange={handleSSRChange}
                                 initialSelection={selectedSSR}
                             />
                         )}
+
 
                         {/* Seat Selection Card */}
                         <Card className="border-none shadow-md bg-white rounded-2xl overflow-hidden">

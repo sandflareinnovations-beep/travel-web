@@ -98,6 +98,7 @@ export default function FlightSearchImproved() {
     const [activeModal, setActiveModal] = useState<"info" | "rules" | null>(null);
     const [modalData, setModalData] = useState<any>(null);
     const [loadingModal, setLoadingModal] = useState(false);
+    const [searchComplete, setSearchComplete] = useState(false);
 
     const abortController = useRef(false);
 
@@ -285,6 +286,8 @@ export default function FlightSearchImproved() {
 
             if (results?.Complete === true) {
                 setLoading(false);
+                setSearchComplete(true);
+                console.log("✅ Search Polling Complete");
                 const currentFlights = useFlightStore.getState().flights;
                 if (journeyResults.length === 0 && currentFlights.length === 0) setError("No flights found.");
             } else {
@@ -322,6 +325,7 @@ export default function FlightSearchImproved() {
         setError("");
         setLoading(true);
         setFlights([]);
+        setSearchComplete(false);
         abortController.current = false;
         setShowPaxModal(false);
 
@@ -373,9 +377,12 @@ export default function FlightSearchImproved() {
     };
 
     /* --- BOOKING HANDLER --- */
-    const handleBook = async (flight: any) => {
-        if (loadingIndex !== null) return;
+    const isBookingRef = useRef(false);
 
+    const handleBook = async (flight: any) => {
+        if (loadingIndex !== null || isBookingRef.current) return;
+
+        isBookingRef.current = true;
         setLoadingIndex(flight.Index);
 
         try {
@@ -393,11 +400,14 @@ export default function FlightSearchImproved() {
                 Options: "",
                 Source: "SF",
                 TripType: tripType,
+                ADT: adults,
+                CHD: children,
+                INF: infants,
             });
 
             if (!spRes?.TUI) throw new Error("Price verification failed.");
 
-            if (!spRes?.TUI) throw new Error("Price verification failed.");
+            console.log("=== SmartPricer Response ===", spRes);
 
             setSelectedFlight(flight);
 
@@ -407,6 +417,7 @@ export default function FlightSearchImproved() {
         } catch (err: any) {
             alert(err.message || "Booking failed.");
             setLoadingIndex(null);
+            isBookingRef.current = false;
         }
     };
 
@@ -708,8 +719,25 @@ export default function FlightSearchImproved() {
                     <aside className="hidden lg:block w-72 flex-shrink-0 sticky top-24 max-h-[calc(100vh-6rem)] overflow-y-auto custom-scrollbar">
                         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
                             <div className="flex items-center justify-between mb-6">
-                                <h2 className="text-lg font-bold text-slate-800">Filters</h2>
-                                <button className="text-blue-600 text-xs font-bold uppercase tracking-wider hover:underline">
+                                <div className="flex items-center gap-2">
+                                    <h2 className="text-lg font-bold text-slate-800">Filters</h2>
+                                    {searchComplete && (
+                                        <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-green-200">
+                                            <Check className="w-3 h-3 mr-1" /> Complete
+                                        </Badge>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setFilters({
+                                            isDirect: false,
+                                            isRefundable: false,
+                                            priceRange: [0, 500000]
+                                        });
+                                        setVisualPriceRange([0, 500000]);
+                                    }}
+                                    className="text-blue-600 text-xs font-bold uppercase tracking-wider hover:underline"
+                                >
                                     Reset
                                 </button>
                             </div>

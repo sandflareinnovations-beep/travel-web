@@ -46,6 +46,9 @@ export interface SmartPricerPayload {
     Options: string;
     Source: string;
     TripType: string;
+    ADT?: number;
+    CHD?: number;
+    INF?: number;
     TUI?: string;
 }
 
@@ -301,7 +304,9 @@ export const flightApi = {
                 throw new Error('SmartPricer failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            console.log('SmartPricer Response Data:', data);
+            return data;
         } catch (error) {
             console.error('SmartPricer Error:', error);
             throw error;
