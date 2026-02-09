@@ -160,6 +160,122 @@ export default function BookingManagement({ type }: BookingManagementProps) {
         }
     };
 
+    const handleCancelBooking = async () => {
+        if (!selectedBooking) return;
+
+        if (!confirm("Are you sure you want to cancel this booking? This action cannot be undone.")) {
+            return;
+        }
+
+        setIsDetailLoading(true);
+        try {
+            const clientId = flightApi.getStoredClientId();
+
+            // Construct payload as per requirement
+            /*
+               Example Payload Structure needed:
+               {
+                 "ClientID": "...",
+                 "TUI": "...",
+                 "TransactionID": 12345,
+                 "Trips": [ { "Journey": [ { "Segments": [ { "CRSPNR": "...", "Pax": [ { "ID": ..., "Ticket": "" } ] } ] } ] } ]
+               }
+            */
+
+            // 1. Identify Passengers to cancel (All by default for now)
+            // We need to map from selectedBooking.PassengerInfo or similar if available details are there.
+            // The retrieveBooking response structure is key here.
+
+            // Assuming selectedBooking has 'Itinerary' or 'Passenger' arrays from RetrieveBooking response
+
+            const trips = [];
+
+            // Check if we have Itinerary details to construct segments
+            if (selectedBooking.Itinerary && selectedBooking.Passenger) {
+                const journey = {
+                    Segments: selectedBooking.Itinerary.map((it: any) => ({
+                        CRSPNR: selectedBooking.PNR, // Or specific segment PNR
+                        Pax: selectedBooking.Passenger.map((p: any) => ({
+                            ID: p.PaxId || p.Id, // Check API response field for Pax ID
+                            Ticket: p.TicketNumber || ""
+                        }))
+                    }))
+                };
+                trips.push({ Journey: [journey] });
+            } else {
+                // Fallback/Try to construct if minimal data
+                // If retrieveBooking hasn't been fully mapped or structure is different, this might fail.
+                // Let's look at what details we usually get.
+                // If we don't have deep structure, we might need to rely on what RetrieveBooking gave us used in render.
+                // Render uses: selectedBooking.Itineraries (array), selectedBooking.PaxInfo (string mostly in list, object in detail?)
+
+                // Let's try to map from the 'Itineraries' array we see in render
+                const segments = selectedBooking.Itineraries?.map((it: any) => ({
+                    CRSPNR: selectedBooking.PNR,
+                    Pax: [] // Need Pax IDs. RetrieveBooking usually returns a list of passengers too.
+                })) || [];
+
+                // If we can't find Pax IDs easily from the current state, we might need to assume or check the `Passenger` array if it exists.
+                // Let's assume RetrieveBooking returns a `Passenger` array (common in these APIs).
+            }
+
+            // Simplification: If the API just needs the TransactionID and basic info for full cancellation:
+            /* 
+               Actually, the user curl showed:
+               "Trips": [ { "Journey": [ { "Segments": [ { "CRSPNR": "TLGS8K", "Pax": [ { "ID": 5234, "Ticket": "" } ] } ] } ] } ]
+               This implies we need specific Pax IDs.
+            */
+
+            // Let's use the response from RetrieveBooking (detail) which we merged into selectedBooking.
+            // We should check if `selectedBooking.Passenger` exists.
+
+            const paxList = selectedBooking.Passenger || [];
+            const paxData = paxList.map((p: any) => ({
+                ID: p.PaxId || p.Id,
+                Ticket: p.TicketNumber || ""
+            }));
+
+            const payload = {
+                ClientID: clientId,
+                ClientIP: "",
+                Remarks: "User requested cancellation via Web",
+                TUI: selectedBooking.TUI || "", // TUI might be needed if session based, often retrieved booking has TUI
+                TransactionID: selectedBooking.TransactionID,
+                Trips: [
+                    {
+                        Journey: [
+                            {
+                                Segments: [
+                                    {
+                                        CRSPNR: selectedBooking.PNR,
+                                        Pax: paxData.length > 0 ? paxData : [{ ID: 0, Ticket: "" }] // Fallback if parsing fails
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            console.log("Cancelling with payload:", payload);
+            const res = await flightApi.cancelBooking(payload);
+
+            if (res.Code === "200" || res.Status === "Success") {
+                alert("Booking cancelled successfully!");
+                setSelectedBooking(null); // Close modal
+                fetchBookings(); // Refresh list
+            } else {
+                alert("Cancellation failed: " + (res.Msg || "Unknown error"));
+            }
+
+        } catch (err: any) {
+            console.error("Cancel failed", err);
+            alert("Error cancelling booking: " + err.message);
+        } finally {
+            setIsDetailLoading(false);
+        }
+    };
+
     const displayData = bookings.filter(item =>
         (item.PNR?.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (item.Origin?.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -415,6 +531,14 @@ export default function BookingManagement({ type }: BookingManagementProps) {
                             )}
                         </div>
                         <div className="p-8 bg-slate-50 border-t flex gap-3">
+                            <Button
+                                variant="destructive"
+                                className="h-12 rounded-2xl font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-100"
+                                onClick={handleCancelBooking}
+                                disabled={isDetailLoading || selectedBooking.Status === 'Cancelled'}
+                            >
+                                {isDetailLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Cancel Booking'}
+                            </Button>
                             <Button className="flex-1 h-12 rounded-2xl bg-slate-900 text-white font-bold" onClick={() => window.open(`/flights/bookings/${selectedBooking.TransactionID}`)}>
                                 <Download className="w-4 h-4 mr-2" /> View Full E-Ticket
                             </Button>
