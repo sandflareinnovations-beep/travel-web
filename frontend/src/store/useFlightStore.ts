@@ -53,6 +53,18 @@ export interface FlightStore {
     sortType: SortType;
     setSortType: (type: SortType) => void;
 
+    webSettings: {
+        isRefundable: boolean;
+        isDirect: boolean;
+        isStudent: boolean;
+        currency: string;
+    };
+    setWebSettings: (settings: Partial<FlightStore['webSettings']>) => void;
+
+    // API Configuration from WebSettings (Server Features)
+    apiConfiguration: any;
+    setApiConfiguration: (config: any) => void;
+
     // Actions
     resetState: () => void;
 }
@@ -75,6 +87,13 @@ const DEFAULT_FILTERS = {
     isDirect: false,
     isRefundable: false,
     priceRange: [0, 500000] as [number, number],
+};
+
+const DEFAULT_WEB_SETTINGS = {
+    isRefundable: false,
+    isDirect: false,
+    isStudent: false,
+    currency: 'INR',
 };
 
 export const useFlightStore = create<FlightStore>()(
@@ -106,6 +125,13 @@ export const useFlightStore = create<FlightStore>()(
             sortType: 'CHEAPEST',
             setSortType: (sortType) => set({ sortType }),
 
+            webSettings: DEFAULT_WEB_SETTINGS,
+            setWebSettings: (settings) =>
+                set((state) => ({ webSettings: { ...state.webSettings, ...settings } })),
+
+            apiConfiguration: null,
+            setApiConfiguration: (config) => set({ apiConfiguration: config }),
+
             resetState: () =>
                 set({
                     searchParams: DEFAULT_PARAMS,
@@ -115,7 +141,9 @@ export const useFlightStore = create<FlightStore>()(
                     searchTui: null,
                     loading: false,
                     error: '',
-                    sortType: 'CHEAPEST'
+                    sortType: 'CHEAPEST',
+                    webSettings: DEFAULT_WEB_SETTINGS,
+                    apiConfiguration: null
                 }),
         }),
         {
@@ -127,6 +155,8 @@ export const useFlightStore = create<FlightStore>()(
                 searchParams: state.searchParams,
                 searchTui: state.searchTui,
                 selectedFlight: state.selectedFlight,
+                webSettings: state.webSettings,
+                apiConfiguration: state.apiConfiguration
                 // filters: state.filters
             }),
         }

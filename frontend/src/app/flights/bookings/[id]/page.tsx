@@ -12,6 +12,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { flightApi } from '@/lib/api';
+import { getBookingStatus } from '@/lib/utils';
 
 export default function BookingDetailPage() {
     const params = useParams();
@@ -34,6 +35,7 @@ export default function BookingDetailPage() {
             if (!clientId) throw new Error("Client ID not found");
 
             const data = await flightApi.retrieveBooking(Number(transactionId), clientId);
+            console.log("RetrieveBooking Response:", data); // Debugging
             setBooking(data);
         } catch (error) {
             console.error("Fetch Error:", error);
@@ -68,13 +70,16 @@ export default function BookingDetailPage() {
     const arrivalDate = trip?.Flight?.ArrivalTime ? new Date(trip.Flight.ArrivalTime) : new Date();
     const baggageInfo = booking?.SSR?.find((s: any) => s.Code === "BAG")?.Description || "15Kg Check-in, 7Kg Cabin";
 
+    const statusConfig = getBookingStatus(booking?.BookingStatus);
+    const StatusIcon = statusConfig.icon;
+
     return (
         <div className="min-h-screen bg-slate-50 py-10 px-4 print:p-0 print:bg-white">
             <div className="max-w-4xl mx-auto">
 
                 {/* Top Toolbar (Hidden on Print) */}
                 <div className="flex justify-between items-center mb-6 print:hidden">
-                    <Button variant="ghost" onClick={() => router.push('/dashboard')} className="text-slate-600">
+                    <Button variant="ghost" onClick={() => router.push('/')} className="text-slate-600">
                         <ArrowLeft className="mr-2 h-4 w-4" /> Dashboard
                     </Button>
                     <div className="flex gap-3">
@@ -95,8 +100,8 @@ export default function BookingDetailPage() {
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-400 to-yellow-500" />
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
                             <div className="space-y-3">
-                                <Badge className="bg-emerald-500 text-white border-none px-4 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase">
-                                    <ShieldCheck className="w-3 h-3 mr-2" /> Confirmed
+                                <Badge className={`${statusConfig.bg} ${statusConfig.color} border-none px-4 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase items-center flex w-fit`}>
+                                    <StatusIcon className="w-3 h-3 mr-2" /> {statusConfig.text}
                                 </Badge>
                                 <h1 className="text-4xl md:text-6xl font-black tracking-tighter uppercase flex items-center gap-4">
                                     {booking?.From} <Plane className="h-8 w-8 text-slate-600 rotate-45" /> {booking?.To}

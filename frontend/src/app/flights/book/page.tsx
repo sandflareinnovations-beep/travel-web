@@ -1,7 +1,7 @@
 "use client";
 //TODO: 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Plus, Trash2, CreditCard, CheckCircle, User, Mail, Phone, Plane, ShieldCheck, Loader2, Armchair, ChevronRight, X } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, CreditCard, CheckCircle, User, Mail, Phone, Plane, ShieldCheck, Loader2, Armchair, ChevronRight, X, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { flightApi } from '@/lib/api';
+import { flightApi, TravelCheckListResponse } from '@/lib/api';
 import { useFlightStore } from '@/store/useFlightStore';
 import SSRSelector from '@/components/SSRSelector';
 
@@ -34,7 +34,7 @@ export default function BookingPage() {
     const tui = searchParams.get('tui');
     const index = searchParams.get('index');
 
-    const { selectedFlight, searchParams: { adults, children, infants } } = useFlightStore();
+    const { selectedFlight, setSelectedFlight, searchParams: { adults, children, infants } } = useFlightStore();
 
     const [passengers, setPassengers] = useState<Passenger[]>([]);
     const [contactEmail, setContactEmail] = useState('');
@@ -53,12 +53,19 @@ export default function BookingPage() {
     const [loadingSeats, setLoadingSeats] = useState(false);
     const [selectedSeats, setSelectedSeats] = useState<Record<number, string>>({}); // passengerId -> seatNumber
 
+    // TravelCheckList (dynamic field requirements)
+    const [travelCheckList, setTravelCheckList] = useState<TravelCheckListResponse | null>(null);
+
     // SSR (Special Service Requests)
     const [selectedSSR, setSelectedSSR] = useState<{
         baggage: any[];
         meals: any[];
     }>({ baggage: [], meals: [] });
     const [ssrTotal, setSSRTotal] = useState(0);
+
+    // Fare change handling
+    const [fareChangeInfo, setFareChangeInfo] = useState<{ oldFare: number; newFare: number } | null>(null);
+    const [showFareChangeModal, setShowFareChangeModal] = useState(false);
 
     // Validation Errors State
     const [errors, setErrors] = useState<{
@@ -242,12 +249,45 @@ export default function BookingPage() {
 
                 setBookingStatus('idle');
                 setLoading(false);
+
+                // Fetch TravelCheckList for dynamic validation rules
+                try {
+                    const checkListRes = await flightApi.getTravelCheckList(
+                        results.TUI || tui!, // Use Pricing TUI if available, else fallback
+                        clientId
+                    );
+                    if (checkListRes?.Code === '200') {
+                        setTravelCheckList(checkListRes);
+                        console.log('✅ TravelCheckList loaded:', checkListRes);
+                    }
+                } catch (checkListErr) {
+                    console.warn('⚠️ TravelCheckList fetch failed (non-blocking):', checkListErr);
+                    // Non-blocking: validation falls back to default (all required)
+                }
             } else {
                 throw new Error(results?.Msg?.[0] || "Failed to validate flight price");
             }
         } catch (error: any) {
             console.error("Pricing failed", error);
             const errorMsg = error.message || "Failed to validate flight price";
+
+            // Check if it's a fare change error
+            if (errorMsg.includes('fare') && errorMsg.includes('Amt')) {
+                // Parse old and new amounts from message
+                const oldMatch = errorMsg.match(/Previous Amt:-?(\d+)/);
+                const newMatch = errorMsg.match(/New Amt:-?(\d+)/);
+
+                if (oldMatch && newMatch) {
+                    setFareChangeInfo({
+                        oldFare: parseInt(oldMatch[1]),
+                        newFare: parseInt(newMatch[1])
+                    });
+                    setShowFareChangeModal(true);
+                    setLoading(false);
+                    setBookingStatus('idle');
+                    return; // Don't show error, show modal instead
+                }
+            }
 
             // Check if it's an expired session error
             if (errorMsg.includes("No Data Found") || errorMsg.includes("expired")) {
@@ -272,6 +312,27 @@ export default function BookingPage() {
                 setLoading(false);
             }
         }
+    };
+
+    const handleAcceptFareChange = () => {
+        setShowFareChangeModal(false);
+
+        // Update flight data with new fare
+        if (fareChangeInfo) {
+            const updatedFlightData = {
+                ...flightData,
+                NetFare: fareChangeInfo.newFare,
+                GrossFare: fareChangeInfo.newFare
+            };
+
+            setFlightData(updatedFlightData);
+
+            // IMPORTANT: Also update Zustand store so Review page gets the correct price
+            setSelectedFlight(updatedFlightData);
+        }
+
+        // Clear fare change info
+        setFareChangeInfo(null);
     };
 
     /* -------------------- SSR Selection Change Handler -------------------- */
@@ -359,23 +420,67 @@ export default function BookingPage() {
             isValid = false;
         }
 
-        // 2. Validate Passengers
+        // 2. Validate Passengers (using TravelCheckList rules if available)
         const nameRegex = /^[A-Za-z]+$/;
+        // Safety check: Ensure arrays exist and have at least one item
+        const checkItem = travelCheckList?.TravellerCheckList?.[0] ?? null;
+        const fnuLnu = travelCheckList?.FnuLnuSettings?.[0] ?? null;
+
+        // Determine which fields are required (default: all required if no checklist)
+        // If checkItem is null, we assume standard requirements (Passport/DOB required for intl, etc., but let's stick to existing logic)
+        // Actually, if checkItem is null, it might mean "no special restrictions", so maybe default to FALSE for odd things?
+        // Let's stick to: if checklist exists, use it. If not, default to TRUE for standard fields to be safe.
+        const isPassportRequired = checkItem ? checkItem.PassportNo === 1 : true;
+        const isPDOERequired = checkItem ? checkItem.PDOE === 1 : false; // Default false if missing? Or true if unknown? Let's say false if unchecked.
+        const isDOBRequired = checkItem ? checkItem.DOB === 1 : true;
+        const isNationalityRequired = checkItem ? checkItem.Nationality === 1 : false;
+        const isVisaRequired = checkItem ? checkItem.VisaType === 1 : false;
+
+        // FNU/LNU Strings
+        const fnuMsg = fnuLnu?.Fnumessage || "First Name is required";
+        const lnuMsg = fnuLnu?.Lnumessage || "Last Name is required";
+        const isTitleMandatory = fnuLnu?.TitleMandatory ?? true;
 
         passengers.forEach(p => {
             const pErrors: Partial<Record<keyof Passenger, string>> = {};
 
-            if (!p.firstName) pErrors.firstName = "First Name is required";
-            else if (!nameRegex.test(p.firstName)) pErrors.firstName = "Alphabets only";
+            // First Name — always required
+            if (!p.firstName) {
+                pErrors.firstName = fnuMsg;
+            } else if (!nameRegex.test(p.firstName)) {
+                pErrors.firstName = "Alphabets only";
+            }
 
-            if (!p.lastName) pErrors.lastName = "Last Name is required";
-            else if (!nameRegex.test(p.lastName)) pErrors.lastName = "Alphabets only";
+            // Last Name — always required
+            if (!p.lastName) {
+                pErrors.lastName = lnuMsg;
+            } else if (!nameRegex.test(p.lastName)) {
+                pErrors.lastName = "Alphabets only";
+            }
 
-            if (!p.dob) pErrors.dob = "Date of Birth is required";
+            // DOB — conditional
+            if (isDOBRequired && !p.dob) {
+                pErrors.dob = "Date of Birth is required";
+            }
 
-            if (p.type === 'ADT') {
-                if (!p.passportNumber) pErrors.passportNumber = "Passport Number is required";
-                // if (!p.passportExpiry) pErrors.passportExpiry = "Passport Expiry is required"; // strictly speaking mostly needed
+            // Passport — conditional (for adults, or when checklist says so)
+            if (isPassportRequired && !p.passportNumber) {
+                pErrors.passportNumber = "Passport Number is required";
+            }
+
+            // Passport Expiry (PDOE) — conditional
+            if (isPDOERequired && !p.passportExpiry) {
+                pErrors.passportExpiry = "Passport Expiry is required";
+            }
+
+            // Nationality — conditional
+            if (isNationalityRequired && !p.nationality) {
+                pErrors.nationality = "Nationality is required";
+            }
+
+            // Visa Type — conditional
+            if (isVisaRequired && p.visaType === 'None') {
+                pErrors.visaType = "Visa Type is required";
             }
 
             if (Object.keys(pErrors).length > 0) {
@@ -426,7 +531,10 @@ export default function BookingPage() {
         console.log("  - Flight TUI:", tui);
         console.log("  - Updated Price (NetFare):", flightData?.NetFare);
 
-        const reviewUrl = `/flights/book/review?tui=${tui}`;
+        // Update router with new TUI if it changed?
+        // Actually, we should pass the LATEST TUI to review page
+        const finalTUI = flightData?.TUI || tui; // Use optional chaining for flightData
+        const reviewUrl = `/flights/book/review?tui=${encodeURIComponent(finalTUI!)}`; // Removed index as it's not defined in this scope
         console.log("🚀 Navigating to review page:", reviewUrl);
 
         router.push(reviewUrl);
@@ -439,7 +547,8 @@ export default function BookingPage() {
 
         setLoadingSeats(true);
         try {
-            const data = await flightApi.getSeatLayout(tui!);
+            const clientId = flightApi.getStoredClientId();
+            const data = await flightApi.getSeatLayout(tui!, clientId, ""); // passing empty index for now as per previous logic
             setSeatLayout(data);
         } catch (err) {
             console.error("SeatLayout failed", err);
@@ -572,6 +681,56 @@ export default function BookingPage() {
                     </div>
                 </div>
 
+                {/* Fare Change Modal */}
+                {showFareChangeModal && fareChangeInfo && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                        <Card className="max-w-md w-full shadow-2xl">
+                            <CardHeader className="bg-amber-50 border-b border-amber-100">
+                                <CardTitle className="flex items-center gap-2 text-amber-900">
+                                    <AlertCircle className="h-5 w-5" />
+                                    Fare Change Detected
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="pt-6 space-y-6">
+                                <p className="text-slate-600">
+                                    The fare for your selected flight has changed. Would you like to proceed with the new fare?
+                                </p>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-red-50 p-4 rounded-xl border border-red-100 text-center">
+                                        <p className="text-xs text-red-600 font-semibold mb-1">Previous Fare</p>
+                                        <p className="text-2xl font-bold text-red-700">₹{fareChangeInfo.oldFare.toLocaleString()}</p>
+                                    </div>
+                                    <div className="bg-green-50 p-4 rounded-xl border border-green-100 text-center">
+                                        <p className="text-xs text-green-600 font-semibold mb-1">New Fare</p>
+                                        <p className="text-2xl font-bold text-green-700">₹{fareChangeInfo.newFare.toLocaleString()}</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3">
+                                    <Button
+                                        variant="outline"
+                                        className="flex-1"
+                                        onClick={() => {
+                                            setShowFareChangeModal(false);
+                                            setFareChangeInfo(null);
+                                            router.back();
+                                        }}
+                                    >
+                                        Go Back
+                                    </Button>
+                                    <Button
+                                        className="flex-1 bg-blue-600 hover:bg-blue-700"
+                                        onClick={handleAcceptFareChange}
+                                    >
+                                        Accept & Continue
+                                    </Button>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+                )}
+
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* Left Column: Forms */}
                     <div className="lg:col-span-2 space-y-8">
@@ -645,7 +804,7 @@ export default function BookingPage() {
 
                                         {/* First Name */}
                                         <div className="space-y-2">
-                                            <Label className="text-slate-600 font-medium">First Name</Label>
+                                            <Label className="text-slate-600 font-medium">First Name <span className="text-red-500">*</span></Label>
                                             <Input
                                                 className={`h-12 focus:ring-blue-500 rounded-xl ${errors.passengers[passenger.id]?.firstName ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                                 placeholder="As on passport"
@@ -659,7 +818,7 @@ export default function BookingPage() {
 
                                         {/* Last Name */}
                                         <div className="space-y-2">
-                                            <Label className="text-slate-600 font-medium">Last Name</Label>
+                                            <Label className="text-slate-600 font-medium">Last Name <span className="text-red-500">*</span></Label>
                                             <Input
                                                 className={`h-12 focus:ring-blue-500 rounded-xl ${errors.passengers[passenger.id]?.lastName ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                                 placeholder="As on passport"
@@ -673,13 +832,16 @@ export default function BookingPage() {
 
                                         {/* DOB */}
                                         <div className="space-y-2">
-                                            <Label className="text-slate-600 font-medium">Date of Birth</Label>
+                                            <Label className="text-slate-600 font-medium">Date of Birth {(!travelCheckList || travelCheckList.TravellerCheckList?.[0]?.DOB === 1) && <span className="text-red-500">*</span>}</Label>
                                             <Input
-                                                className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
+                                                className={`h-12 focus:ring-blue-500 rounded-xl ${errors.passengers[passenger.id]?.dob ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                                 type="date"
                                                 value={passenger.dob}
                                                 onChange={(e) => updatePassenger(passenger.id, 'dob', e.target.value)}
                                             />
+                                            {errors.passengers[passenger.id]?.dob && (
+                                                <p className="text-xs text-red-500 mt-1">{errors.passengers[passenger.id]?.dob}</p>
+                                            )}
                                         </div>
 
                                         {/* Nationality */}
@@ -705,7 +867,7 @@ export default function BookingPage() {
 
                                         {/* Passport Number (PLI) - Mandatory for Adults */}
                                         <div className="space-y-2">
-                                            <Label className="text-slate-600 font-medium">Passport / ID Number <span className="text-red-500">*</span></Label>
+                                            <Label className="text-slate-600 font-medium">Passport / ID Number {(!travelCheckList || travelCheckList.TravellerCheckList?.[0]?.PassportNo === 1) && <span className="text-red-500">*</span>}</Label>
                                             <Input
                                                 className={`h-12 focus:ring-blue-500 rounded-xl ${errors.passengers[passenger.id]?.passportNumber ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                                 placeholder="Required for Adults"
@@ -719,13 +881,16 @@ export default function BookingPage() {
 
                                         {/* Passport Expiry */}
                                         <div className="space-y-2">
-                                            <Label className="text-slate-600 font-medium">Passport Expiry</Label>
+                                            <Label className="text-slate-600 font-medium">Passport Expiry {(!travelCheckList || travelCheckList.TravellerCheckList?.[0]?.PDOE === 1) && <span className="text-red-500">*</span>}</Label>
                                             <Input
-                                                className="h-12 border-slate-200 focus:ring-blue-500 rounded-xl"
+                                                className={`h-12 focus:ring-blue-500 rounded-xl ${errors.passengers[passenger.id]?.passportExpiry ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                                                 type="date"
                                                 value={passenger.passportExpiry}
                                                 onChange={(e) => updatePassenger(passenger.id, 'passportExpiry', e.target.value)}
                                             />
+                                            {errors.passengers[passenger.id]?.passportExpiry && (
+                                                <p className="text-xs text-red-500 mt-1">{errors.passengers[passenger.id]?.passportExpiry}</p>
+                                            )}
                                         </div>
 
 

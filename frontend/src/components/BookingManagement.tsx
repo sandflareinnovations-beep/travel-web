@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
     Search, Filter, MoreHorizontal, Plane, Bed, Car,
     FileText, ArrowUpRight, Plus, ArrowLeft, Loader2,
-    Eye, XCircle, Download, User, RefreshCw
+    Eye, XCircle, Download, User, RefreshCw, X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -83,6 +83,15 @@ export default function BookingManagement({ type }: BookingManagementProps) {
         to: new Date(),
     });
 
+    const [isMobile, setIsMobile] = useState(false);
+
+    useEffect(() => {
+        const checkMobile = () => setIsMobile(window.innerWidth < 1024);
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
     useEffect(() => {
         if (type === 'flight') {
             fetchBookings();
@@ -101,13 +110,10 @@ export default function BookingManagement({ type }: BookingManagementProps) {
             const timestamp = now.toISOString().replace(/[-T:.Z]/g, "").slice(0, 14);
 
             const payload = {
-                TUI: `6e824e0c-1b79-452a-a992-2ee295b8b676|a98850a2-f1f9-476c-b090-f2fd895e459b|${timestamp}`,
                 ClientID: clientId,
-                TransactionID: "",
-                PNR: "",
-                TravelFromDate: "",
-                TravelToDate: "",
                 Service: "FLT",
+                Status: "ALL",
+                TransactionType: "A",
                 BookingFromDate: dateRange?.from ? format(dateRange.from, 'yyyy-MM-dd') : "",
                 BookingToDate: dateRange?.to ? format(dateRange.to, 'yyyy-MM-dd') : ""
             };
@@ -122,10 +128,10 @@ export default function BookingManagement({ type }: BookingManagementProps) {
                     Origin: booking.FromSector?.split('-')[0]?.trim() || '',
                     Destination: booking.ToSector?.split('-')[0]?.trim() || '',
                     BookingDate: booking.BookingDate,
-                    NetAmount: booking.Netamount, // lowercase 'a'
+                    NetAmount: booking.NetAmount, // Corrected to PascalCase 'NetAmount'
                     Status: booking.BookingStatus?.split(',')[0] || 'Pending', // "BO1,BR1" -> "BO1"
                     PNR: booking.Itineraries?.[0]?.ConfirmationId || 'PENDING',
-                    supplierName: booking.supplierName,
+                    supplierName: booking.SupplierName, // Corrected to PascalCase 'SupplierName'
                     TripType: booking.TripType,
                     Itineraries: booking.Itineraries,
                     FromSector: booking.FromSector,
@@ -328,24 +334,32 @@ export default function BookingManagement({ type }: BookingManagementProps) {
                 <>
                     <Card className="border-none shadow-sm ring-1 ring-slate-100 overflow-hidden rounded-[1.5rem]">
                         <CardHeader className="pb-4 bg-slate-50/50">
-                            <div className="flex items-center gap-4">
-                                <div className="relative flex-1">
+                            <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4">
+                                <div className="relative flex-1 w-full">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                                     <Input
                                         placeholder="Search by PNR, Transaction ID or City..."
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="pl-10 bg-white border-slate-200 rounded-xl h-11 w-full"
+                                        className="pl-10 pr-10 bg-white border-slate-200 rounded-xl h-11 w-full"
                                     />
+                                    {searchTerm && (
+                                        <button
+                                            onClick={() => setSearchTerm('')}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    )}
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
                                     <Popover>
                                         <PopoverTrigger asChild>
                                             <Button
                                                 id="date"
                                                 variant={"outline"}
                                                 className={cn(
-                                                    "w-[300px] justify-start text-left font-normal rounded-xl h-11",
+                                                    "w-full sm:w-[260px] justify-start text-left font-normal rounded-xl h-11",
                                                     !dateRange && "text-muted-foreground"
                                                 )}
                                             >
@@ -364,18 +378,21 @@ export default function BookingManagement({ type }: BookingManagementProps) {
                                                 )}
                                             </Button>
                                         </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0" align="start">
-                                            <Calendar
-                                                initialFocus
-                                                mode="range"
-                                                defaultMonth={dateRange?.from}
-                                                selected={dateRange}
-                                                onSelect={setDateRange}
-                                                numberOfMonths={2}
-                                            />
+                                        <PopoverContent className="w-auto p-0" align="end">
+                                            <div className="p-3">
+                                                <Calendar
+                                                    initialFocus
+                                                    mode="range"
+                                                    defaultMonth={dateRange?.from}
+                                                    selected={dateRange}
+                                                    onSelect={setDateRange}
+                                                    numberOfMonths={isMobile ? 1 : 2}
+                                                    className="rounded-md border-0"
+                                                />
+                                            </div>
                                         </PopoverContent>
                                     </Popover>
-                                    <Button variant="outline" size="icon" className="rounded-xl h-11 w-11"><Filter className="h-4 w-4" /></Button>
+                                    <Button variant="outline" size="icon" className="rounded-xl h-11 w-11 shrink-0"><Filter className="h-4 w-4" /></Button>
                                 </div>
                             </div>
                         </CardHeader>
