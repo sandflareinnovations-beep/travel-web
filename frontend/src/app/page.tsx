@@ -24,9 +24,11 @@ export default function Home() {
     const initSession = async () => {
       try {
         const token = sessionStorage.getItem('auth_token');
+        let clientId = sessionStorage.getItem('client_id');
+
         if (!token) {
           console.log("No session found, initializing...");
-          await flightApi.signature({
+          const authData = await flightApi.signature({
             MerchantID: "300",
             ApiKey: "kXAY9yHARK",
             ClientID: "bitest",
@@ -35,7 +37,26 @@ export default function Home() {
             BrowserKey: "caecd3cd30225512c1811070dce615c1",
             Key: "ef20-925c-4489-bfeb-236c8b406f7e"
           });
+          clientId = authData?.ClientID;
         }
+
+        // Fetch WebSettings if we have a ClientID (Session Valid/Created)
+        if (clientId) {
+          const settings = await flightApi.getWebSettings(clientId, "");
+          if (settings) {
+            // Dynamic import or direct access if useFlightStore is imported
+            // Since this component might not be using the hook directly for rendering, we access state directly or via hook
+            // But wait, we aren't importing useFlightStore here yet.
+            // We'll need to import it.
+            // For now, let's assume I'll add the import.
+            // @ts-ignore
+            import("@/store/useFlightStore").then(({ useFlightStore }) => {
+              useFlightStore.getState().setApiConfiguration(settings);
+              console.log("✅ WebSettings Initialized:", settings);
+            });
+          }
+        }
+
       } catch (err) {
         console.error("Session initialization failed:", err);
         router.push('/login');

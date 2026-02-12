@@ -61,11 +61,11 @@ export interface CreateItineraryPayload {
         Mobile: string;
         Phone?: string;
         Email: string;
-        Address: string;
-        CountryCode: string;
-        State: string;
-        City: string;
-        PIN: string;
+        Address?: string;
+        CountryCode?: string;
+        State?: string;
+        City?: string;
+        PIN?: string;
         GSTCompanyName?: string;
         GSTTIN?: string;
         GSTMobile?: string;
@@ -75,22 +75,39 @@ export interface CreateItineraryPayload {
     };
     Travellers: {
         ID: number;
+        PaxID?: string;
+        Operation?: string;
         Title: string;
         FName: string;
         LName: string;
+        Email?: string;
+        PMobileNo?: string;
         Age: number;
         DOB: string;
         Gender: string;
+        Country?: string;
         PTC: string;
         Nationality: string;
         PassportNo?: string;
         PLI?: string;
+        PDOI?: string;
         PDOE?: string;
         VisaType?: string;
+        EmigrationCheck?: boolean;
+        isOptionSelected?: boolean;
+        ApproverManagers?: any;
+        DocumentType?: string;
     }[];
     PLP: any[];
-    SSR: any[];
+    SSR: {
+        FUID: number;
+        PaxID: number;
+        SSID: number;
+    }[] | null;
     CrossSell: any[];
+    EnableFareMasking?: boolean;
+    AgentTourCode?: string;
+    BRulesAccepted?: string;
     NetAmount: number;
     SSRAmount: number;
     ClientID: string;
@@ -99,10 +116,12 @@ export interface CreateItineraryPayload {
     CrossSellAmount: number;
 }
 
+
 export interface StartPayPayload {
     TransactionID: number;
     PaymentAmount: number;
     NetAmount: number;
+    StartPay?: boolean;
     BrowserKey: string;
     ClientID: string;
     TUI: string;
@@ -152,15 +171,49 @@ export interface SignaturePayload {
 }
 
 export interface GetBookingListPayload {
-    TUI: string;
     ClientID: string;
+    Service: string;
+    Status: string;
+    TransactionType: string;
+    BookingFromDate: string;
+    BookingToDate: string;
+    TUI?: string;
     TransactionID?: string;
     PNR?: string;
     TravelFromDate?: string;
     TravelToDate?: string;
-    Service: string;
-    BookingFromDate: string;
-    BookingToDate: string;
+}
+
+export interface TravelCheckListPayload {
+    TUI: string;
+    ClientID: string;
+}
+
+export interface TravellerCheckItem {
+    PassportNo: number;  // 1 = required, 0 = optional
+    DOB: number;
+    Nationality: number;
+    VisaType: number;
+    PDOE: number; // Passport Date of Expiry
+    PLI: number;  // Place of Issue?
+    PDOI: number; // Passport Date of Issue
+    PANNo: number;
+    EmigCheck: number;
+}
+
+export interface FnuLnuSetting {
+    AirlineCode: string;
+    TitleMandatory: boolean;
+    Fnumessage: string;
+    Lnumessage: string;
+}
+
+export interface TravelCheckListResponse {
+    Code: string;
+    Msg: string[];
+    TravellerCheckList: TravellerCheckItem[];
+    FnuLnuSettings: FnuLnuSetting[];
+    IsHRMSMandatory: boolean;
 }
 
 // ============================================
@@ -170,7 +223,8 @@ export interface GetBookingListPayload {
 const API_BASE_URL = 'http://13.228.159.25:3001/flight';
 const UTILS_BASE_URL = 'http://13.228.159.25:3001/utils/utils';
 const BOOKING_BASE_URL = 'http://13.228.159.25:3001/flight/Utils';
-const AUTH_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6IjMwMCIsIkFnZW50SW5mbyI6Ii9MRldjVENVQ3lkWVBjVGNuaFdLaWo0UXhhcXN2eFBIcWV0a0psY3NGZklxWmVCUkZIUlNTOFFRWE1ybk8vVDhFcmt6UnMyYzk3cnloS01sWXc3NitRPT0iLCJwd2QiOiJMMkV0NEcvWHE0bExYQUd4Q3M2REh3PT0iLCJhZ2VudENvZGUiOiIvS2ZkWXdlc3FQdz0iLCJjbGllbnRJZCI6IjJmelhFa014VkRVPSIsIkJyb3dzZXJLZXkiOiIrNlg5SlVvTSttNE9VdFRBMVoxamlaTlViRHhCMWIwY0VLR21ud2JyTmVwZERvd0xHeVVzT2c9PSIsIm5iZiI6MTc2OTkyNTEzOCwiZXhwIjoxNzc4NTY1MTM4LCJpYXQiOjE3Njk5MjUxMzgsImlzcyI6IndlYmNvbm5lY3QiLCJhdWQiOiJjbGllbnQifQ.c27RhBOUtzwNupSqCj0_zXxYJuOvTocoRazG6qtG5OE';
+const AUTH_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6IjMwMCIsIkFnZW50SW5mbyI6Ii9MRldjVENVQ3lkWVBjVGNuaFdLaWo0UXhhcXN2eFBIcWV0a0psY3NGZklxWmVCUkZIUlNTOFFRWE1ybk8vVDhFcmt6UnMyYzk3cnloS01sWXc3NitRPT0iLCJwd2QiOiJMMkV0NEcvWHE0bExYQUd4Q3M2REh3PT0iLCJhZ2VudENvZGUiOiIvS2ZkWXdlc3FQdz0iLCJjbGllbnRJZCI6IjJmelhFa014VkRVPSIsIkJyb3dzZXJLZXkiOiIrNlg5SlVvTSttNE9VdFRBMVoxamlaTlViRHhCMWIwY0VLR21ud2JyTmVwZERvd0xHeVVzT2c9PSIsIm5iZiI6MTc3MDMxNjYxMCwiZXhwIjoxNzc4OTU2NjEwLCJpYXQiOjE3NzAzMTY2MTAsImlzcyI6IndlYmNvbm5lY3QiLCJhdWQiOiJjbGllbnQifQ.7VC2odats4DI-2BSGe2c4fuFx55q3Gnsh1YEnJKQpwI';
+const HEADER_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6IjMwMCIsIkFnZW50SW5mbyI6Ii9MRldjVENVQ3lkWVBjVGNuaFdLaWo0UXhhcXN2eFBIcWV0a0psY3NGZklxWmVCUkZIUlNTOFFRWE1ybk8vVDhFcmt6UnMyYzk3cnloS01sWXc3NitRPT0iLCJwd2QiOiJMMkV0NEcvWHE0bExYQUd4Q3M2REh3PT0iLCJhZ2VudENvZGUiOiIvS2ZkWXdlc3FQdz0iLCJjbGllbnRJZCI6IjJmelhFa014VkRVPSIsIkJyb3dzZXJLZXkiOiIrNlg5SlVvTSttNE9VdFRBMVoxamlaTlViRHhCMWIwY0VLR21ud2JyTmVwZERvd0xHeVVzT2c9PSIsIm5iZiI6MTc3MDMxNzAxNCwiZXhwIjoxNzc4OTU3MDE0LCJpYXQiOjE3NzAzMTcwMTQsImlzcyI6IndlYmNvbm5lY3QiLCJhdWQiOiJjbGllbnQifQ.gsA7CieqP_iqgAS43q1W_PRUlUWdI8L__LDxHVx_1V8';
 
 // ============================================
 // Flight API Client
@@ -210,6 +264,44 @@ export const flightApi = {
         } catch (error) {
             console.error('Signature Method Error:', error);
             throw error;
+        }
+    },
+
+    // 1.1 WebSettings - Get enabled features
+    getWebSettings: async (clientId: string, tui: string) => {
+        try {
+            console.log('--- WebSettings Request ---');
+            // Endpoint: {UtilsURL}/Utils/WebSettings
+            // Note: UTILS_BASE_URL is '.../utils/utils', so we need to be careful with path
+            // Looking at Signature: `${UTILS_BASE_URL}/Signature` -> `.../utils/utils/Signature`
+            // Required: `.../utils/utils/WebSettings` ? Or just `/Utils/WebSettings` relative to some base?
+            // User provided: "End Point : {UtilsURL}/Utils/WebSettings"
+            // If UTILS_BASE_URL is 'http://13.228.159.25:3001/utils/utils', then `${UTILS_BASE_URL}/WebSettings` might be correct if the second 'utils' is the controller.
+            // Let's assume standard pattern with UTILS_BASE_URL.
+
+            const url = `${UTILS_BASE_URL}/WebSettings`;
+            console.log('URL:', url);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': AUTH_TOKEN
+                },
+                body: JSON.stringify({ ClientID: clientId, TUI: tui }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`WebSettings failed (${response.status})`);
+            }
+
+            const data = await response.json();
+            console.log('WebSettings Response:', data);
+            return data;
+        } catch (error) {
+            console.error('WebSettings Error:', error);
+            // Don't throw, just return null or empty to not block flow
+            return null;
         }
     },
 
@@ -346,7 +438,10 @@ export const flightApi = {
     // 7. CreateItinerary - Create booking
     createItinerary: async (payload: CreateItineraryPayload) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/Flights/CreateItinerary`, {
+            console.log('--- CreateItinerary Request ---');
+            console.log('Payload:', payload);
+
+            const response = await fetch(`${API_BASE_URL}/flights/CreateItinerary`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -448,32 +543,37 @@ export const flightApi = {
     },
 
     // 10. SeatLayout - Get seat map
-    getSeatLayout: async (tui: string) => {
+    getSeatLayout: async (tui: string, clientId: string, index: string = "") => {
         try {
+            console.log('--- SeatLayout Request ---');
+            const payload = {
+                ClientID: clientId,
+                Source: "LV",
+                Trips: [
+                    {
+                        TUI: tui,
+                        Index: index,
+                        OrderID: 1
+                    }
+                ]
+            };
+            console.log('Payload:', payload);
+
             const response = await fetch(`${API_BASE_URL}/Flights/SeatLayout`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': AUTH_TOKEN
                 },
-                body: JSON.stringify({
-                    ClientID: "",
-                    Source: "LV",
-                    Trips: [
-                        {
-                            TUI: tui,
-                            Index: "",
-                            OrderID: 1
-                        }
-                    ]
-                }),
+                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
                 throw new Error('SeatLayout failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            return data;
         } catch (error) {
             console.error('SeatLayout Error:', error);
             throw error;
@@ -560,7 +660,7 @@ export const flightApi = {
     },
 
     // 14. RetrieveBooking - Get booking details
-    retrieveBooking: async (transactionId: number, clientId: string) => {
+    retrieveBooking: async (transactionId: number, clientId: string, tui?: string) => {
         try {
             // ⚠️ BOOKING_BASE_URL എന്നത് 'http://13.228.159.25:3001/flight/Utils' ആണെന്ന് ഉറപ്പാക്കുക
             const response = await fetch(`${BOOKING_BASE_URL}/RetrieveBooking`, {
@@ -575,7 +675,7 @@ export const flightApi = {
                     ReferenceType: "T",                    // 'T' എന്നാൽ Transaction
                     ServiceType: "FLT",                   // 'FLT' എന്നാൽ Flight
                     ClientID: clientId,
-                    TUI: ''
+                    TUI: tui || '' // Use provided TUI or empty string
                 }),
             });
 
@@ -594,12 +694,13 @@ export const flightApi = {
     // 15. GetBookingList
     getBookingList: async (payload: GetBookingListPayload) => {
         try {
-            // Using the specific URL for GetBookings
-            const response = await fetch('http://13.228.159.25:3001/utils/Utils/GetBookings', {
+            // Using the specific URL for GetBookings via proxy
+            const response = await fetch('/api/utils/utils/GetBookings', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${AUTH_TOKEN.replace('Bearer ', '')}`
+                    'Authorization': `Bearer ${AUTH_TOKEN.replace('Bearer ', '')}`,
+                    'token': HEADER_TOKEN
                 },
                 body: JSON.stringify(payload),
             });
@@ -634,6 +735,32 @@ export const flightApi = {
             return await response.json();
         } catch (error) {
             console.error('Cancel Error:', error);
+            throw error;
+        }
+    },
+
+    // 16. GetTravelCheckList - Get required field validation rules
+    getTravelCheckList: async (tui: string, clientId: string): Promise<TravelCheckListResponse> => {
+        try {
+            console.log('--- GetTravelCheckList Request ---');
+            const response = await fetch(`${BOOKING_BASE_URL}/GetTravelCheckList`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': AUTH_TOKEN
+                },
+                body: JSON.stringify({ TUI: tui, ClientID: clientId }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`GetTravelCheckList failed (${response.status})`);
+            }
+
+            const data = await response.json();
+            console.log('GetTravelCheckList Response:', data);
+            return data;
+        } catch (error) {
+            console.error('GetTravelCheckList Error:', error);
             throw error;
         }
     },

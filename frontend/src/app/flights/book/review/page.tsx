@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { flightApi, CreateItineraryPayload } from '@/lib/api';
+import { flightApi, CreateItineraryPayload, TravelCheckListResponse } from '@/lib/api';
 import { useFlightStore } from '@/store/useFlightStore';
 
 // --- HELPER FUNCTIONS ---
@@ -43,7 +43,12 @@ export default function ReviewPage() {
     const [passengers, setPassengers] = useState<any[]>([]);
     const [contact, setContact] = useState<any>(null);
     const [flightData, setFlightData] = useState<any>(null);
+    const [travelCheckList, setTravelCheckList] = useState<TravelCheckListResponse | null>(null);
     const [error, setError] = useState('');
+
+    // Fare change handling
+    const [fareChangeInfo, setFareChangeInfo] = useState<{ oldFare: number; newFare: number } | null>(null);
+    const [showFareChangeModal, setShowFareChangeModal] = useState(false);
 
     // SSR state
     const [ssrSelections, setSSRSelections] = useState<any>(null);
@@ -62,8 +67,9 @@ export default function ReviewPage() {
         const storedPassengers = sessionStorage.getItem('bookingPassengers');
         const storedContact = sessionStorage.getItem('bookingContact');
 
-        // Use store flight if available, else check session (legacy fallback)
-        const currentFlight = selectedFlight || (sessionStorage.getItem('selectedFlight') ? JSON.parse(sessionStorage.getItem('selectedFlight')!) : null);
+        // IMPORTANT: Prioritize session storage (has updated fare) over Zustand store
+        const sessionFlight = sessionStorage.getItem('selectedFlight');
+        const currentFlight = sessionFlight ? JSON.parse(sessionFlight) : selectedFlight;
 
         console.log("Data check:", {
             hasPassengers: !!storedPassengers,
@@ -93,6 +99,14 @@ export default function ReviewPage() {
 
             if (storedSSR) setSSRSelections(JSON.parse(storedSSR));
             if (storedSSRTotal) setSSRAmount(parseFloat(storedSSRTotal));
+
+
+            // Fetch checklist again to know what to display
+            flightApi.getTravelCheckList(tui!, flightApi.getStoredClientId())
+                .then(res => {
+                    if (res?.Code === '200') setTravelCheckList(res);
+                })
+                .catch(err => console.warn("Review checklist fetch failed", err));
 
         } catch (err) {
             console.error("❌ Error parsing session data:", err);
@@ -134,63 +148,86 @@ export default function ReviewPage() {
                 }
             }
 
-            console.log("📦 Formatted SSR Data:", ssrArray);
-            console.log("💰 SSR Total Amount:", ssrAmount);
+            // DEBUG: Log values before sending
+            console.log("=== DEBUG: CreateItinerary Payload Construction ===");
+            console.log("fareChangeInfo:", fareChangeInfo);
+            console.log("flightData.NetFare:", flightData.NetFare);
+
+            // Explicitly calculate NetAmount to use
+            const netAmountToUse = fareChangeInfo?.newFare ?? flightData.NetFare;
+            console.log("netAmountToUse:", netAmountToUse);
+            console.log("===================================================");
 
             const payload: CreateItineraryPayload = {
                 TUI: tui!,
                 ClientID: clientId,
-                NetAmount: flightData.NetFare,  // Base fare ONLY - API adds SSR separately
-                SSRAmount: ssrAmount,  // Use actual SSR amount
-                CrossSellAmount: 0,
-                PLP: [],
-                SSR: ssrArray,  // ✅ Now includes actual SSR data
-                CrossSell: [],
                 ContactInfo: {
                     Title: passengers[0].title, // Add Title if API expects it
                     FName: passengers[0].firstName,
                     LName: passengers[0].lastName,
                     Email: contact.email,
-                    Mobile: contact.phone,
-                    Phone: "",
-                    Address: "Online Booking",
-                    CountryCode: "IN",
-                    State: "Kerala",
-                    City: "Cochin",
-                    PIN: "682001"
+                    Mobile: contact.phone
                 },
                 Travellers: passengers.map((p) => {
-                    // ✅ FIX: Calculate exact age here
                     const exactAge = calculateAge(p.dob);
-
                     return {
                         ID: p.id,
                         Title: p.title,
                         FName: p.firstName,
                         LName: p.lastName,
-                        Age: exactAge, // <--- Using calculated age
+                        Age: exactAge,
                         DOB: p.dob,
                         Gender: p.gender,
-                        Nationality: p.nationality,
+                        Nationality: p.nationality || "IN",
+                        PTC: p.type,
                         PassportNo: p.passportNumber || "",
-                        PLI: p.passportNumber || "", // Mandatory for Adults
+                        PLI: "MUMBAI",
                         PDOE: p.passportExpiry || "",
-                        VisaType: "None",
-                        PTC: p.type
+                        VisaType: "None"
                     };
-                })
+                }),
+                NetAmount: netAmountToUse,
+                SSR: ssrArray.length > 0 ? ssrArray : null,
+                SSRAmount: ssrAmount,
+                CrossSell: [],
+                CrossSellAmount: 0,
+                PLP: []
             };
 
-            console.log("Creating Itinerary Payload:", payload);
+            console.log("Full Payload with NetAmount:", payload.NetAmount);
+            console.log("Full Payload:", payload);
 
             const response = await flightApi.createItinerary(payload);
 
             if (response.Code === "200" || response.Status === "Success") {
                 const transactionId = response.TransactionID || response.BookingID;
                 const totalAmount = flightData.NetFare + ssrAmount;
-                router.push(`/flights/book/payment?tid=${transactionId}&amt=${totalAmount}`);
+
+                // CRITICAL: Use TUI from CreateItinerary response, not the original booking TUI
+                const paymentTUI = response.TUI || tui;
+                console.log("🎫 Using TUI for payment:", paymentTUI);
+
+                router.push(`/flights/book/payment?tid=${transactionId}&amt=${totalAmount}&tui=${encodeURIComponent(paymentTUI!)}`);
             } else {
+                // Check for fare change error
                 const msg = Array.isArray(response.Msg) ? response.Msg.join(', ') : (response.Msg || "Booking Failed");
+
+                // Detect fare change scenario
+                if (msg.includes('fare') && msg.includes('Amt')) {
+                    // Parse old and new amounts from message
+                    const oldMatch = msg.match(/Previous Amt:-?(\d+)/);
+                    const newMatch = msg.match(/New Amt:-?(\d+)/);
+
+                    if (oldMatch && newMatch) {
+                        setFareChangeInfo({
+                            oldFare: parseInt(oldMatch[1]),
+                            newFare: parseInt(newMatch[1])
+                        });
+                        setShowFareChangeModal(true);
+                        return; // Don't throw error, show modal instead
+                    }
+                }
+
                 throw new Error(msg);
             }
 
@@ -200,6 +237,25 @@ export default function ReviewPage() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleAcceptFareChange = async () => {
+        setShowFareChangeModal(false);
+        // Don't clear fareChangeInfo yet - handleCreateItinerary needs it for NetAmount
+
+        // Update flight data with new fare for UI display
+        if (fareChangeInfo) {
+            setFlightData((prev: any) => ({
+                ...prev,
+                NetFare: fareChangeInfo.newFare
+            }));
+        }
+
+        // Retry booking with updated fare
+        await handleCreateItinerary();
+
+        // Clear fare change info after successful retry
+        setFareChangeInfo(null);
     };
 
     if (!flightData || !contact) {
@@ -230,6 +286,57 @@ export default function ReviewPage() {
                         <AlertTitle>Booking Error</AlertTitle>
                         <AlertDescription>{error}</AlertDescription>
                     </Alert>
+                )}
+
+                {/* Fare Change Modal */}
+                {showFareChangeModal && fareChangeInfo && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                        <Card className="max-w-md w-full shadow-2xl">
+                            <CardHeader className="bg-amber-50 border-b border-amber-100">
+                                <CardTitle className="flex items-center gap-2 text-amber-900">
+                                    <AlertCircle className="h-5 w-5" />
+                                    Fare Change Detected
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="pt-6 space-y-6">
+                                <p className="text-slate-600">
+                                    The fare for your selected flight has changed. Would you like to proceed with the new fare?
+                                </p>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-red-50 p-4 rounded-xl border border-red-100 text-center">
+                                        <p className="text-xs text-red-600 font-semibold mb-1">Previous Fare</p>
+                                        <p className="text-2xl font-bold text-red-700">₹{fareChangeInfo.oldFare.toLocaleString()}</p>
+                                    </div>
+                                    <div className="bg-green-50 p-4 rounded-xl border border-green-100 text-center">
+                                        <p className="text-xs text-green-600 font-semibold mb-1">New Fare</p>
+                                        <p className="text-2xl font-bold text-green-700">₹{fareChangeInfo.newFare.toLocaleString()}</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3">
+                                    <Button
+                                        variant="outline"
+                                        className="flex-1"
+                                        onClick={() => {
+                                            setShowFareChangeModal(false);
+                                            setFareChangeInfo(null);
+                                            router.back();
+                                        }}
+                                    >
+                                        Go Back
+                                    </Button>
+                                    <Button
+                                        className="flex-1 bg-blue-600 hover:bg-blue-700"
+                                        onClick={handleAcceptFareChange}
+                                        disabled={loading}
+                                    >
+                                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Accept & Continue'}
+                                    </Button>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
                 )}
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -298,12 +405,32 @@ export default function ReviewPage() {
                                             </div>
                                             <div>
                                                 <p className="font-bold text-slate-900">{p.title} {p.firstName} {p.lastName}</p>
-                                                <div className="flex gap-3 text-xs text-slate-500 mt-1">
+                                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500 mt-1">
                                                     <span>{p.gender === 'M' ? 'Male' : 'Female'}</span>
                                                     <span>•</span>
                                                     <span>{p.nationality}</span>
                                                     <span>•</span>
                                                     <span>{calculateAge(p.dob)} yrs</span>
+
+                                                    {/* Dynamic Fields Display */}
+                                                    {travelCheckList?.TravellerCheckList?.[0]?.PassportNo === 1 && p.passportNumber && (
+                                                        <>
+                                                            <span>•</span>
+                                                            <span className="text-slate-700 font-medium">Passport: {p.passportNumber}</span>
+                                                        </>
+                                                    )}
+                                                    {travelCheckList?.TravellerCheckList?.[0]?.PassportNo === 1 && p.passportExpiry && (
+                                                        <>
+                                                            <span>•</span>
+                                                            <span>Exp: {formatDate(p.passportExpiry)}</span>
+                                                        </>
+                                                    )}
+                                                    {travelCheckList?.TravellerCheckList?.[0]?.VisaType === 1 && p.visaType && p.visaType !== "None" && (
+                                                        <>
+                                                            <span>•</span>
+                                                            <span className="text-slate-700 font-medium">Visa: {p.visaType}</span>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>

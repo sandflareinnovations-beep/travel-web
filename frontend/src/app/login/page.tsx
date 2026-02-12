@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Lock, Key, ShieldCheck, Mail, ArrowRight, UserCog, User, Globe, Hash, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { flightApi } from '@/lib/api';
+import { useFlightStore } from '@/store/useFlightStore';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -32,7 +33,19 @@ export default function LoginPage() {
         setIsLoading(true);
         setError("");
         try {
-            await flightApi.signature(payload);
+            // 1. Authenticate
+            const authData = await flightApi.signature(payload);
+
+            // 2. Fetch WebSettings (Global Config)
+            if (authData?.ClientID) {
+                // Pass empty TUI as per discussion for session-level init
+                const settings = await flightApi.getWebSettings(authData.ClientID, "");
+                if (settings) {
+                    useFlightStore.getState().setApiConfiguration(settings);
+                    console.log("✅ WebSettings Loaded:", settings);
+                }
+            }
+
             router.push('/');
         } catch (err: any) {
             setError(err.message || "Authentication failed. Please check your credentials.");

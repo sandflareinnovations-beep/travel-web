@@ -17,9 +17,10 @@ function PaymentContent() {
     const searchParams = useSearchParams();
     const { setSelectedFlight } = useFlightStore();
 
-    // URL-ൽ നിന്ന് tid (Transaction ID), amt (Amount) എന്നിവ എടുക്കുന്നു
+    // URL-ൽ നിന്ന് tid (Transaction ID), amt (Amount), tui എന്നിവ എടുക്കുന്നു
     const transactionId = searchParams.get('tid');
     const amount = searchParams.get('amt');
+    const tuiParam = searchParams.get('tui');
 
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'failed'>('idle');
@@ -54,11 +55,12 @@ function PaymentContent() {
 
             const payload: StartPayPayload = {
                 TransactionID: Number(transactionId),
-                PaymentAmount: Number(amount),
+                PaymentAmount: 0,
                 NetAmount: Number(amount),
+                StartPay: true,
                 BrowserKey: "e3f560de2c422e2ed29f4e4b8ab27017",
                 ClientID: clientId,
-                TUI: "",
+                TUI: tuiParam || "", // Use TUI from URL parameter
                 Hold: false,
                 Promo: null,
                 PaymentType: "Deposit",

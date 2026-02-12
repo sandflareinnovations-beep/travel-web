@@ -29,7 +29,9 @@ import {
     Luggage,
     Globe,
     ChevronRight,
+    Settings,
 } from "lucide-react";
+import WebSettingsModal from "@/components/WebSettingsModal";
 import { flightApi } from "@/lib/api";
 import { useFlightStore } from "@/store/useFlightStore";
 import { Button } from "@/components/ui/button";
@@ -58,6 +60,7 @@ export default function FlightSearchImproved() {
         sortType,
         setSortType,
         setSelectedFlight,
+        webSettings,
     } = useFlightStore();
 
     const {
@@ -78,6 +81,7 @@ export default function FlightSearchImproved() {
 
     // LOCAL UI STATE
     const [showPaxModal, setShowPaxModal] = useState(false);
+    const [showSettingsModal, setShowSettingsModal] = useState(false);
 
     // VISUAL PRICE SLIDER (Local)
     const [visualPriceRange, setVisualPriceRange] = useState<[number, number]>([0, 500000]);
@@ -341,7 +345,7 @@ export default function FlightSearchImproved() {
                 Mode: "AS",
                 ClientID: clientId,
                 IsMultipleCarrier: false,
-                IsRefundable: false,
+                IsRefundable: webSettings.isRefundable,
                 preferedAirlines: null,
                 TUI: "",
                 SecType: "",
@@ -357,9 +361,9 @@ export default function FlightSearchImproved() {
                 Parameters: {
                     Airlines: "",
                     GroupType: "",
-                    Refundable: "",
-                    IsDirect: false,
-                    IsStudentFare: isStudent,
+                    Refundable: webSettings.isRefundable ? "Y" : "",
+                    IsDirect: webSettings.isDirect,
+                    IsStudentFare: webSettings.isStudent,
                     IsNearbyAirport: isNearby,
                     IsExtendedSearch: "false",
                 },
@@ -396,8 +400,8 @@ export default function FlightSearchImproved() {
                     },
                 ],
                 ClientID: flightApi.getStoredClientId(),
-                Mode: "AS",
-                Options: "",
+                Mode: "SS",
+                Options: "A",
                 Source: "SF",
                 TripType: tripType,
                 ADT: adults,
@@ -436,6 +440,11 @@ export default function FlightSearchImproved() {
                 />
             )}
 
+            <WebSettingsModal
+                isOpen={showSettingsModal}
+                onClose={() => setShowSettingsModal(false)}
+            />
+
             {/* --- HEADER WITH SEARCH CARD --- */}
             <div className="bg-gradient-to-r from-sky-400 to-blue-300 pt-6 pb-32 px-4">
                 <div className="max-w-7xl mx-auto">
@@ -448,6 +457,16 @@ export default function FlightSearchImproved() {
                             <p className="text-blue-100 text-sm">
                                 Find the best deals on flights
                             </p>
+                        </div>
+
+                        <div className="ml-auto">
+                            <button
+                                onClick={() => setShowSettingsModal(true)}
+                                className="p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all backdrop-blur-sm"
+                                title="Search Settings"
+                            >
+                                <Settings className="w-6 h-6" />
+                            </button>
                         </div>
                     </div>
 
