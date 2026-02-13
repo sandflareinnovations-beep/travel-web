@@ -17,7 +17,7 @@ function PaymentContent() {
     const searchParams = useSearchParams();
     const { setSelectedFlight } = useFlightStore();
 
-    // URL-ൽ നിന്ന് tid (Transaction ID), amt (Amount), tui എന്നിവ എടുക്കുന്നു
+    // Get tid (Transaction ID), amt (Amount), tui from URL
     const transactionId = searchParams.get('tid');
     const amount = searchParams.get('amt');
     const tuiParam = searchParams.get('tui');
@@ -89,16 +89,16 @@ function PaymentContent() {
             const response = await flightApi.startPay(payload);
             console.log("Payment Response:", response);
 
-            // ✅ കൺഫർമേഷൻ ചെക്ക്: 200 (Success) അല്ലെങ്കിൽ 6033 (In Progress)
+            // Confirmation check: 200 (Success) or 6033 (In Progress)
             if (response.Code === "200" || response.Code === "6033" || response.Status === "Success") {
                 setStatus('success');
 
-                // സെഷൻ വിവരങ്ങൾ ക്ലിയർ ചെയ്യുന്നു - Using Store now
+                // Clear session data - Using Store now
                 sessionStorage.removeItem('bookingPassengers');
                 setSelectedFlight(null); // Clear store flight
 
-                // ✅ 2 സെക്കന്റിന് ശേഷം പുതിയ ടിക്കറ്റ് പേജിലേക്ക് റീഡയറക്ട് ചെയ്യുന്നു
-                // ✅ ശരിയായ പാത്ത് ഇതാണ്
+                // Redirect to ticket page after 2 seconds
+                // Correct path
                 setTimeout(() => {
                     router.push(`/flights/bookings/${transactionId}`);
                 }, 2000);
