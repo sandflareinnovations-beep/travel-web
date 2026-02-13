@@ -201,11 +201,25 @@ export default function FlightSearchImproved() {
         }
     };
 
+    /* --- STOP CALCULATION HELPER --- */
+    const getStops = (flight: any): number => {
+        // Use Hops field (reliable) or fall back to Connections length
+        if (flight.Hops !== undefined && flight.Hops !== null) {
+            return Number(flight.Hops);
+        }
+        // Fallback: count connections
+        if (flight.Connections && Array.isArray(flight.Connections)) {
+            return flight.Connections.length;
+        }
+        // Final fallback
+        return 0;
+    };
+
     /* --- VISUAL FILTERING & SORTING --- */
     const visibleFlights = useMemo(() => {
         // 1. Filter
         const filtered = flights.filter((f) => {
-            if (isDirect && f.Stops > 0) return false;
+            if (isDirect && getStops(f) > 0) return false;
             if (isRefundable && f.Refundable !== "Y") return false;
             const price = f.NetFare || f.GrossFare || 0;
             if (price < priceRange[0] || price > priceRange[1]) return false;
@@ -298,18 +312,60 @@ export default function FlightSearchImproved() {
                 setTimeout(() => pollResults(tui, clientId, startTime, 0), 2500);
             }
         } catch (err: any) {
-            const isTimeout =
-                err.message?.includes("504") || err.message?.includes("timeout");
-            const newRetryCount = retryCount + 1;
+            console.error('⚠️ Search Error:', err);
 
-            if (isTimeout && newRetryCount <= 5 && !abortController.current) {
-                const delay = Math.min(3000 + newRetryCount * 1000, 8000);
-                setTimeout(
-                    () => pollResults(tui, clientId, startTime, newRetryCount),
-                    delay
-                );
-            } else if (!abortController.current) {
-                setTimeout(() => pollResults(tui, clientId, startTime, 0), 3000);
+            // Check if user cancelled
+            if (abortController.current) {
+                return;
+            }
+
+            // Determine error type and show user-friendly message
+            const errorMessage = err.message?.toLowerCase() || '';
+            const isCorsError = errorMessage.includes('cors') || errorMessage.includes('failed to fetch');
+            const isTimeout = errorMessage.includes('504') || errorMessage.includes('timeout') || errorMessage.includes('gateway');
+            const isNetworkError = errorMessage.includes('network') || errorMessage.includes('fetch');
+
+            // Handle different error types
+            if (isCorsError || isNetworkError) {
+                // Network/CORS errors - retry silently a few times
+                const newRetryCount = retryCount + 1;
+                if (newRetryCount <= 5) {
+                    console.log(`🔄 Retrying search (attempt ${newRetryCount}/5)...`);
+                    const delay = Math.min(2000 + newRetryCount * 1000, 6000);
+                    setTimeout(() => pollResults(tui, clientId, startTime, newRetryCount), delay);
+                    return;
+                } else {
+                    // After max retries, show user-friendly error
+                    setLoading(false);
+                    setError("Unable to connect to flight search service. Please check your internet connection and try again.");
+                    return;
+                }
+            }
+
+            if (isTimeout) {
+                // Timeout errors - retry with backoff
+                const newRetryCount = retryCount + 1;
+                if (newRetryCount <= 5) {
+                    console.log(`⏱️ Request timed out, retrying (attempt ${newRetryCount}/5)...`);
+                    const delay = Math.min(3000 + newRetryCount * 1500, 8000);
+                    setTimeout(() => pollResults(tui, clientId, startTime, newRetryCount), delay);
+                    return;
+                } else {
+                    setLoading(false);
+                    setError("Flight search is taking longer than expected. Please try again with different dates or routes.");
+                    return;
+                }
+            }
+
+            // Generic error - continue polling if within time limit
+            if (elapsed < MAX_SEARCH_TIME) {
+                setTimeout(() => pollResults(tui, clientId, startTime, retryCount), 3000);
+            } else {
+                setLoading(false);
+                const currentFlights = useFlightStore.getState().flights;
+                if (currentFlights.length === 0) {
+                    setError("Search encountered an issue. Please try again.");
+                }
             }
         }
     };
@@ -984,8 +1040,8 @@ export default function FlightSearchImproved() {
                                                             <Plane className="w-4 h-4 text-blue-500 bg-white px-0.5 rotate-45" />
                                                         </div>
                                                     </div>
-                                                    <p className={`text-[10px] font-bold uppercase tracking-wider ${f.Stops === 0 ? 'text-emerald-600' : 'text-amber-500'}`}>
-                                                        {f.Stops === 0 ? "Non-stop" : `${f.Stops} Stop(s)`}
+                                                    <p className={`text-[10px] font-bold uppercase tracking-wider ${getStops(f) === 0 ? 'text-emerald-600' : 'text-amber-500'}`}>
+                                                        {getStops(f) === 0 ? "Non-stop" : getStops(f) === 1 ? "1 Stop" : `${getStops(f)} Stops`}
                                                     </p>
                                                 </div>
 

@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
             {
                 Code: '500',
                 Msg: ['Failed to fetch SSR data'],
-                SSR: null,
+                SSR: [],
             },
             { status: 500 }
         );

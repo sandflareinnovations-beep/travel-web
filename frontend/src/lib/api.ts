@@ -99,11 +99,7 @@ export interface CreateItineraryPayload {
         DocumentType?: string;
     }[];
     PLP: any[];
-    SSR: {
-        FUID: number;
-        PaxID: number;
-        SSID: number;
-    }[] | null;
+    SSR: any[];
     CrossSell: any[];
     EnableFareMasking?: boolean;
     AgentTourCode?: string;
@@ -231,6 +227,13 @@ const HEADER_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6I
 // ============================================
 
 export const flightApi = {
+    // Logging Helper
+    logAPI: (method: string, type: 'REQUEST' | 'RESPONSE' | 'ERROR', data: any) => {
+        const emoji = type === 'REQUEST' ? '📤' : type === 'RESPONSE' ? '📥' : '❌';
+        const color = type === 'REQUEST' ? 'color: #2563eb' : type === 'RESPONSE' ? 'color: #16a34a' : 'color: #dc2626';
+        console.log(`%c${emoji} [${method}] ${type}`, color, data);
+    },
+
     // 1. Authentication
     signature: async (payload: SignaturePayload) => {
         try {
@@ -308,9 +311,7 @@ export const flightApi = {
     // 2. Search - ExpressSearch
     expressSearch: async (payload: SearchPayload) => {
         try {
-            console.log('--- ExpressSearch Request ---');
-            console.log('URL:', `${API_BASE_URL}/flights/ExpressSearch`);
-            console.log('Payload:', payload);
+            flightApi.logAPI('ExpressSearch', 'REQUEST', payload);
 
             const response = await fetch(`${API_BASE_URL}/flights/ExpressSearch`, {
                 method: 'POST',
@@ -321,8 +322,6 @@ export const flightApi = {
                 body: JSON.stringify(payload),
             });
 
-            console.log('ExpressSearch Response Status:', response.status);
-
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 console.error('ExpressSearch Error Response:', errorData);
@@ -330,10 +329,10 @@ export const flightApi = {
             }
 
             const data = await response.json();
-            console.log('ExpressSearch Response Data:', data);
+            flightApi.logAPI('ExpressSearch', 'RESPONSE', data);
             return data;
         } catch (error) {
-            console.error('ExpressSearch Error:', error);
+            flightApi.logAPI('ExpressSearch', 'ERROR', error);
             throw error;
         }
     },
@@ -341,6 +340,7 @@ export const flightApi = {
     // 3. Get Search Results
     getExpSearch: async (clientId: string, tui: string, signal?: AbortSignal) => {
         try {
+            flightApi.logAPI('GetExpSearch', 'REQUEST', { ClientID: clientId, TUI: tui });
             // Add 30-second timeout
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 seconds
@@ -370,7 +370,7 @@ export const flightApi = {
                 console.log('GetExpSearch aborted (Manual or Navigation)');
                 throw error; // Re-throw so the caller can decide to be silent
             }
-            console.error('GetExpSearch Error:', error);
+            flightApi.logAPI('GetExpSearch', 'ERROR', error);
             throw error;
         }
     },
@@ -380,7 +380,7 @@ export const flightApi = {
     // 4. SmartPricer - Initiate fare validation (Direct Call)
     smartPricer: async (payload: SmartPricerPayload) => {
         try {
-            console.log('--- SmartPricer Request ---');
+            flightApi.logAPI('SmartPricer', 'REQUEST', payload);
             const response = await fetch(`${API_BASE_URL}/flights/SmartPricer`, {
                 method: 'POST',
                 headers: {
@@ -397,10 +397,10 @@ export const flightApi = {
             }
 
             const data = await response.json();
-            console.log('SmartPricer Response Data:', data);
+            flightApi.logAPI('SmartPricer', 'RESPONSE', data);
             return data;
         } catch (error) {
-            console.error('SmartPricer Error:', error);
+            flightApi.logAPI('SmartPricer', 'ERROR', error);
             throw error;
         }
     },
@@ -408,7 +408,7 @@ export const flightApi = {
     // 5. GetSPricer - Get validated fare details (Direct Call)
     getSPricer: async (clientId: string, tui: string) => {
         try {
-            console.log('--- GetSPricer Request ---');
+            flightApi.logAPI('GetSPricer', 'REQUEST', { TUI: tui, ClientID: clientId });
             const response = await fetch(`${API_BASE_URL}/flights/GetSPricer`, {
                 method: 'POST',
                 headers: {
@@ -427,9 +427,10 @@ export const flightApi = {
             const data = await response.json();
             // Ensure TUI is preserved in the response object
             if (!data.TUI && tui) data.TUI = tui;
+            flightApi.logAPI('GetSPricer', 'RESPONSE', data);
             return data;
         } catch (error) {
-            console.error('GetSPricer Error:', error);
+            flightApi.logAPI('GetSPricer', 'ERROR', error);
             throw error;
         }
     },
@@ -438,8 +439,7 @@ export const flightApi = {
     // 7. CreateItinerary - Create booking
     createItinerary: async (payload: CreateItineraryPayload) => {
         try {
-            console.log('--- CreateItinerary Request ---');
-            console.log('Payload:', payload);
+            flightApi.logAPI('CreateItinerary', 'REQUEST', payload);
 
             const response = await fetch(`${API_BASE_URL}/flights/CreateItinerary`, {
                 method: 'POST',
@@ -454,9 +454,11 @@ export const flightApi = {
                 throw new Error('CreateItinerary failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            flightApi.logAPI('CreateItinerary', 'RESPONSE', data);
+            return data;
         } catch (error) {
-            console.error('CreateItinerary Error:', error);
+            flightApi.logAPI('CreateItinerary', 'ERROR', error);
             throw error;
         }
     },
@@ -464,6 +466,7 @@ export const flightApi = {
     // 8. StartPay - Process payment
     startPay: async (payload: StartPayPayload) => {
         try {
+            flightApi.logAPI('StartPay', 'REQUEST', payload);
             const response = await fetch(`${API_BASE_URL}/payment/StartPay`, {
                 method: 'POST',
                 headers: {
@@ -477,9 +480,11 @@ export const flightApi = {
                 throw new Error('Payment failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            flightApi.logAPI('StartPay', 'RESPONSE', data);
+            return data;
         } catch (error) {
-            console.error('StartPay Error:', error);
+            flightApi.logAPI('StartPay', 'ERROR', error);
             throw error;
         }
     },
@@ -487,6 +492,8 @@ export const flightApi = {
     // 9. FareRule - Get cancellation policy
     getFareRule: async (clientId: string, tui: string) => {
         try {
+            const payload = { TUI: tui, ClientID: clientId };
+            flightApi.logAPI('FareRule', 'REQUEST', payload);
             const response = await fetch(`${API_BASE_URL}/flights/FareRule`, {
                 method: 'POST',
                 headers: {
@@ -500,9 +507,11 @@ export const flightApi = {
                 throw new Error('FareRule failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            flightApi.logAPI('FareRule', 'RESPONSE', data);
+            return data;
         } catch (error) {
-            console.error('FareRule Error:', error);
+            flightApi.logAPI('FareRule', 'ERROR', error);
             throw error;
         }
     },
@@ -510,6 +519,8 @@ export const flightApi = {
     // 10. GetPrice - Get current price for TUI
     getPrice: async (tui: string) => {
         try {
+            const payload = { TUI: tui };
+            flightApi.logAPI('GetPrice', 'REQUEST', payload);
             const response = await fetch(`${API_BASE_URL}/flights/GetPrice`, {
                 method: 'POST',
                 headers: {
@@ -537,27 +548,35 @@ export const flightApi = {
 
             return data;
         } catch (error) {
-            console.error('GetPrice Error:', error);
+            flightApi.logAPI('GetPrice', 'ERROR', error);
             throw error;
         }
     },
 
     // 10. SeatLayout - Get seat map
-    getSeatLayout: async (tui: string, clientId: string, index: string = "") => {
+    getSeatLayout: async (tui: string, fuid: string | number, airlineCode: string) => {
         try {
-            console.log('--- SeatLayout Request ---');
             const payload = {
-                ClientID: clientId,
-                Source: "LV",
+                TUI: tui,
+                PaidSSR: true,
                 Trips: [
                     {
-                        TUI: tui,
-                        Index: index,
-                        OrderID: 1
+                        TUI: tui, // The API explicitly demands this
+                        Journey: [
+                            {
+                                Provider: airlineCode,
+                                Segments: [
+                                    {
+                                        FUID: Number(fuid),
+                                        VAC: airlineCode
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             };
-            console.log('Payload:', payload);
+            flightApi.logAPI('SeatLayout', 'REQUEST', payload);
 
             const response = await fetch(`${API_BASE_URL}/Flights/SeatLayout`, {
                 method: 'POST',
@@ -573,9 +592,10 @@ export const flightApi = {
             }
 
             const data = await response.json();
+            flightApi.logAPI('SeatLayout', 'RESPONSE', data);
             return data;
         } catch (error) {
-            console.error('SeatLayout Error:', error);
+            flightApi.logAPI('SeatLayout', 'ERROR', error);
             throw error;
         }
     },
@@ -583,32 +603,36 @@ export const flightApi = {
     // 11. SSR - Special Service Requests
     getSSR: async (tui: string, clientId: string) => {
         try {
+            const payload = {
+                ClientID: clientId,
+                PaidSSR: true,
+                Source: "LV",
+                Trips: [{
+                    TUI: tui,
+                    Amount: 0,
+                    OrderID: 1,
+                    Index: ""
+                }]
+            };
+            flightApi.logAPI('SSR', 'REQUEST', payload);
             const response = await fetch(`${API_BASE_URL}/Flights/SSR`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': AUTH_TOKEN
                 },
-                body: JSON.stringify({
-                    ClientID: clientId,
-                    PaidSSR: true,
-                    Source: "LV",
-                    Trips: [{
-                        TUI: tui,
-                        Amount: 0,
-                        OrderID: 1,
-                        Index: ""
-                    }]
-                }),
+                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
                 throw new Error('SSR failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            flightApi.logAPI('SSR', 'RESPONSE', data);
+            return data;
         } catch (error) {
-            console.error('SSR Error:', error);
+            flightApi.logAPI('SSR', 'ERROR', error);
             throw error;
         }
     },
@@ -616,6 +640,7 @@ export const flightApi = {
     // 12. FlightInfo - Detailed flight information (requires full payload like SmartPricer)
     getFlightInfo: async (payload: any) => {
         try {
+            flightApi.logAPI('FlightInfo', 'REQUEST', payload);
             const response = await fetch(`${API_BASE_URL}/Flights/FlightInfo`, {
                 method: 'POST',
                 headers: {
@@ -629,9 +654,11 @@ export const flightApi = {
                 throw new Error('FlightInfo failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            flightApi.logAPI('FlightInfo', 'RESPONSE', data);
+            return data;
         } catch (error) {
-            console.error('FlightInfo Error:', error);
+            flightApi.logAPI('FlightInfo', 'ERROR', error);
             throw error;
         }
     },
@@ -639,6 +666,7 @@ export const flightApi = {
     // 13. FareRule - Get fare rules and cancellation policy (with full payload)
     getFareRuleDetails: async (payload: any) => {
         try {
+            flightApi.logAPI('FareRuleDetails', 'REQUEST', payload);
             const response = await fetch(`${API_BASE_URL}/Flights/FareRule`, {
                 method: 'POST',
                 headers: {
@@ -652,9 +680,11 @@ export const flightApi = {
                 throw new Error('FareRule failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            flightApi.logAPI('FareRuleDetails', 'RESPONSE', data);
+            return data;
         } catch (error) {
-            console.error('FareRule Error:', error);
+            flightApi.logAPI('FareRuleDetails', 'ERROR', error);
             throw error;
         }
     },
@@ -694,6 +724,7 @@ export const flightApi = {
     // 15. GetBookingList
     getBookingList: async (payload: GetBookingListPayload) => {
         try {
+            flightApi.logAPI('GetBookingList', 'REQUEST', payload);
             // Using the specific URL for GetBookings via proxy
             const response = await fetch('/api/utils/utils/GetBookings', {
                 method: 'POST',
@@ -709,9 +740,11 @@ export const flightApi = {
                 throw new Error('GetBookingList failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            flightApi.logAPI('GetBookingList', 'RESPONSE', data);
+            return data;
         } catch (error) {
-            console.error('GetBookingList Error:', error);
+            flightApi.logAPI('GetBookingList', 'ERROR', error);
             throw error;
         }
     },
@@ -719,6 +752,7 @@ export const flightApi = {
     // 15. Cancel - Cancel booking
     cancelBooking: async (payload: any) => {
         try {
+            flightApi.logAPI('CancelBooking', 'REQUEST', payload);
             const response = await fetch(`${API_BASE_URL}/Flights/Cancel`, {
                 method: 'POST',
                 headers: {
@@ -732,9 +766,11 @@ export const flightApi = {
                 throw new Error('Cancel failed');
             }
 
-            return await response.json();
+            const data = await response.json();
+            flightApi.logAPI('CancelBooking', 'RESPONSE', data);
+            return data;
         } catch (error) {
-            console.error('Cancel Error:', error);
+            flightApi.logAPI('CancelBooking', 'ERROR', error);
             throw error;
         }
     },
@@ -742,7 +778,8 @@ export const flightApi = {
     // 16. GetTravelCheckList - Get required field validation rules
     getTravelCheckList: async (tui: string, clientId: string): Promise<TravelCheckListResponse> => {
         try {
-            console.log('--- GetTravelCheckList Request ---');
+            const payload = { TUI: tui, ClientID: clientId };
+            flightApi.logAPI('GetTravelCheckList', 'REQUEST', payload);
             const response = await fetch(`${BOOKING_BASE_URL}/GetTravelCheckList`, {
                 method: 'POST',
                 headers: {
@@ -757,10 +794,10 @@ export const flightApi = {
             }
 
             const data = await response.json();
-            console.log('GetTravelCheckList Response:', data);
+            flightApi.logAPI('GetTravelCheckList', 'RESPONSE', data);
             return data;
         } catch (error) {
-            console.error('GetTravelCheckList Error:', error);
+            flightApi.logAPI('GetTravelCheckList', 'ERROR', error);
             throw error;
         }
     },
