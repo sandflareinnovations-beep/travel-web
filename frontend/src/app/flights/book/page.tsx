@@ -182,13 +182,29 @@ export default function BookingPage() {
             const results = await flightApi.getSPricer(clientId, tui!);
 
             if (results?.Code === "200") {
-                // Merge confirmed price into existing flightData if cached, else use response directly
+                // Merge confirmed price into existing flight Data if cached, else use response directly
                 setFlightData((prev: any) => ({
                     ...prev,
                     ...results, // Merge full response including SSRs, Trips, etc.
                     NetFare: results.NetAmount || prev?.NetFare,
                     GrossFare: results.GrossFare || prev?.GrossFare
                 }));
+
+                // ✅ EXTRACT FUID AND AIRLINE CODE FOR SEATLAYOUT
+                try {
+                    const fuid = results?.Trips?.[0]?.Journey?.[0]?.Segments?.[0]?.Flight?.FUID;
+                    const airlineCode = results?.Trips?.[0]?.Journey?.[0]?.Segments?.[0]?.Flight?.MAC;
+
+                    if (fuid && airlineCode) {
+                        console.log('✅ Extracted from GetSPricer:', { FUID: fuid, Airline: airlineCode });
+                        sessionStorage.setItem('bookingFUID', String(fuid));
+                        sessionStorage.setItem('bookingAirline', airlineCode);
+                    } else {
+                        console.warn('⚠️ Could not extract FUID or Airline from GetSPricer response');
+                    }
+                } catch (err) {
+                    console.error('Error extracting FUID:', err);
+                }
 
                 // SYNC PASSENGERS WITH API COUNTS
                 // If the user changed the search inputs but didn't search again, the Store might have more pax than the TUI.
@@ -547,8 +563,14 @@ export default function BookingPage() {
 
         setLoadingSeats(true);
         try {
-            const clientId = flightApi.getStoredClientId();
-            const data = await flightApi.getSeatLayout(tui!, clientId, ""); // passing empty index for now as per previous logic
+            const fuid = sessionStorage.getItem('bookingFUID');
+            const airlineCode = sessionStorage.getItem('bookingAirline');
+
+            if (!fuid || !airlineCode) {
+                throw new Error('Missing FUID or Airline code. Please refresh and try again.');
+            }
+
+            const data = await flightApi.getSeatLayout(tui!, fuid, airlineCode);
             setSeatLayout(data);
         } catch (err) {
             console.error("SeatLayout failed", err);

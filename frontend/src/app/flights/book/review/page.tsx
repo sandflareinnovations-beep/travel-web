@@ -11,6 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { flightApi, CreateItineraryPayload, TravelCheckListResponse } from '@/lib/api';
 import { useFlightStore } from '@/store/useFlightStore';
+import { parseWebSettings, isFeatureEnabled, FeatureKeys } from '@/lib/webSettings';
 
 // --- HELPER FUNCTIONS ---
 
@@ -121,6 +122,35 @@ export default function ReviewPage() {
         try {
             const clientId = flightApi.getStoredClientId();
 
+            // ✅ CONDITIONAL SEATLAYOUT CALL FOR AIRLINES LIKE INDIGO (6E)
+            const fuid = sessionStorage.getItem('bookingFUID');
+            const airlineCode = sessionStorage.getItem('bookingAirline');
+            const apiConfiguration = useFlightStore.getState().apiConfiguration;
+
+            // Check if airline requires SeatLayout call
+            if (fuid && airlineCode && apiConfiguration) {
+                try {
+                    const settingsMap = parseWebSettings(apiConfiguration);
+                    const requiresSeatLayout = isFeatureEnabled(
+                        settingsMap,
+                        FeatureKeys.SHOW_SEAT_LAYOUT_DOM,
+                        airlineCode
+                    );
+
+                    if (requiresSeatLayout) {
+                        console.log(`✅ ${airlineCode} requires SeatLayout API call before booking`);
+                        // Call SeatLayout to initialize seat availability in booking session
+                        await flightApi.getSeatLayout(tui!, fuid, airlineCode);
+                        console.log('✅ SeatLayout API called successfully');
+                    } else {
+                        console.log(`ℹ️ ${airlineCode} does not require SeatLayout API call`);
+                    }
+                } catch (seatError) {
+                    console.warn('⚠️ SeatLayout call failed, continuing with booking:', seatError);
+                    // Don't fail the entire booking if SeatLayout fails
+                }
+            }
+
             // Format SSR data for API
             const ssrArray: any[] = [];
             if (ssrSelections) {
@@ -187,7 +217,7 @@ export default function ReviewPage() {
                     };
                 }),
                 NetAmount: netAmountToUse,
-                SSR: ssrArray.length > 0 ? ssrArray : null,
+                SSR: ssrArray.length > 0 ? ssrArray : [],
                 SSRAmount: ssrAmount,
                 CrossSell: [],
                 CrossSellAmount: 0,
