@@ -692,18 +692,18 @@ export const flightApi = {
     // 14. RetrieveBooking - Get booking details
     retrieveBooking: async (transactionId: number, clientId: string, tui?: string) => {
         try {
-            // ⚠️ BOOKING_BASE_URL എന്നത് 'http://13.228.159.25:3001/flight/Utils' ആണെന്ന് ഉറപ്പാക്കുക
+            // BOOKING_BASE_URL should be 'http://13.228.159.25:3001/flight/Utils'
             const response = await fetch(`${BOOKING_BASE_URL}/RetrieveBooking`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': AUTH_TOKEN // നിങ്ങളുടെ വാലിഡ് ടോക്കൺ ഇവിടെ ഉണ്ടെന്ന് ഉറപ്പാക്കുക
+                    'Authorization': AUTH_TOKEN // Your valid token should be here
                 },
-                // ✅ പേലോഡ് ഇവിടെ മാറ്റം വരുത്തിയിരിക്കുന്നു
+                // Payload configured here
                 body: JSON.stringify({
-                    ReferenceNumber: String(transactionId), // API ആവശ്യപ്പെടുന്ന കൃത്യമായ പേര്
-                    ReferenceType: "T",                    // 'T' എന്നാൽ Transaction
-                    ServiceType: "FLT",                   // 'FLT' എന്നാൽ Flight
+                    ReferenceNumber: String(transactionId), // Exact field name required by API
+                    ReferenceType: "T",                    // 'T' means Transaction
+                    ServiceType: "FLT",                   // 'FLT' means Flight
                     ClientID: clientId,
                     TUI: tui || '' // Use provided TUI or empty string
                 }),

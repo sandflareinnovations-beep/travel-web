@@ -151,46 +151,107 @@ const FlightTicket = forwardRef<HTMLDivElement, FlightTicketProps>(({ booking },
                     {passengers.map((pax: any, idx: number) => (
                         <div key={idx} style={{
                             backgroundColor: 'rgba(255, 255, 255, 0.7)',
-                            padding: '12px 16px',
+                            padding: '16px',
                             borderRadius: '12px',
-                            marginBottom: '8px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center'
+                            marginBottom: '12px',
                         }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <div style={{
-                                    backgroundColor: '#0ea5e9',
-                                    color: '#ffffff',
-                                    width: '28px',
-                                    height: '28px',
-                                    borderRadius: '50%',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '12px',
-                                    fontWeight: 'bold'
-                                }}>
-                                    {(idx + 1).toString().padStart(2, '0')}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                    <div style={{
+                                        backgroundColor: '#0ea5e9',
+                                        color: '#ffffff',
+                                        width: '32px',
+                                        height: '32px',
+                                        borderRadius: '50%',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontSize: '14px',
+                                        fontWeight: 'bold'
+                                    }}>
+                                        {(idx + 1).toString().padStart(2, '0')}
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '16px', fontWeight: '700', color: '#111827', marginBottom: '2px' }}>
+                                            {pax.Title} {pax.FName || pax.FirstName} {pax.LName || pax.LastName}
+                                        </div>
+                                        <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                                            {pax.PTC === 'ADT' ? 'Adult' : pax.PTC === 'CHD' ? 'Child' : pax.PTC === 'INF' ? 'Infant' : pax.PTC}
+                                        </div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#111827' }}>
-                                        {pax.Title} {pax.FName || pax.FirstName} {pax.LName || pax.LastName}
-                                    </div>
-                                    <div style={{ fontSize: '11px', color: '#6b7280' }}>
-                                        {pax.PTC} • Seat: {pax.SeatNumber || 'TBA'}
-                                    </div>
+                                <div style={{
+                                    backgroundColor: '#10b981',
+                                    color: '#ffffff',
+                                    padding: '4px 12px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: '600'
+                                }}>
+                                    Confirmed
                                 </div>
                             </div>
-                            <div style={{
-                                backgroundColor: '#10b981',
-                                color: '#ffffff',
-                                padding: '4px 12px',
-                                borderRadius: '6px',
-                                fontSize: '11px',
-                                fontWeight: '600'
-                            }}>
-                                Confirmed
+
+                            {/* Additional Passenger Info Grid */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', fontSize: '12px' }}>
+                                {pax.DOB && (
+                                    <div>
+                                        <span style={{ color: '#6b7280' }}>Date of Birth: </span>
+                                        <span style={{ fontWeight: '600', color: '#111827' }}>
+                                            {new Date(pax.DOB).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                        </span>
+                                    </div>
+                                )}
+                                {pax.Gender && (
+                                    <div>
+                                        <span style={{ color: '#6b7280' }}>Gender: </span>
+                                        <span style={{ fontWeight: '600', color: '#111827' }}>{pax.Gender === 'M' ? 'Male' : pax.Gender === 'F' ? 'Female' : pax.Gender}</span>
+                                    </div>
+                                )}
+                                {pax.Nationality && (
+                                    <div>
+                                        <span style={{ color: '#6b7280' }}>Nationality: </span>
+                                        <span style={{ fontWeight: '600', color: '#111827' }}>{pax.Nationality}</span>
+                                    </div>
+                                )}
+                                {pax.SeatNumber && (
+                                    <div>
+                                        <span style={{ color: '#6b7280' }}>Seat: </span>
+                                        <span style={{ fontWeight: '600', color: '#111827' }}>{pax.SeatNumber}</span>
+                                    </div>
+                                )}
+                                {pax.PassportNumber && (
+                                    <div>
+                                        <span style={{ color: '#6b7280' }}>Passport: </span>
+                                        <span style={{ fontWeight: '600', color: '#111827' }}>{pax.PassportNumber}</span>
+                                    </div>
+                                )}
+                                {pax.PassportExpiry && (
+                                    <div>
+                                        <span style={{ color: '#6b7280' }}>Expiry: </span>
+                                        <span style={{ fontWeight: '600', color: '#111827' }}>
+                                            {new Date(pax.PassportExpiry).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                        </span>
+                                    </div>
+                                )}
+                                {pax.FrequentFlyerNumber && (
+                                    <div>
+                                        <span style={{ color: '#6b7280' }}>FF Number: </span>
+                                        <span style={{ fontWeight: '600', color: '#111827' }}>{pax.FrequentFlyerNumber}</span>
+                                    </div>
+                                )}
+                                {pax.Email && (
+                                    <div>
+                                        <span style={{ color: '#6b7280' }}>Email: </span>
+                                        <span style={{ fontWeight: '600', color: '#111827', fontSize: '11px' }}>{pax.Email}</span>
+                                    </div>
+                                )}
+                                {pax.Phone && (
+                                    <div>
+                                        <span style={{ color: '#6b7280' }}>Phone: </span>
+                                        <span style={{ fontWeight: '600', color: '#111827' }}>{pax.Phone}</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ))}
